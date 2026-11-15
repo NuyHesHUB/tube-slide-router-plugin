@@ -425,6 +425,17 @@ export const register: Register = (on) => {
     }
     const { value: settings } = await $.state.get({ plugin: 'tube-slide-router', key: 'settings' })
     const c = await ensureCtx($)
+    // pin outranks everything, including off — an explicit model/effort pin is a stronger,
+    // more specific statement of intent than "leave this session alone" (see HELP/pin command).
+    // Applies to every step of every turn while active, not just step 0 — a pin is a session-
+    // wide override, not a per-turn classification.
+    if (settings?.pin) {
+      const { model, effort } = settings.pin
+      await setStatusLine($, c, statusLineText({ config: c.config, settings, model, effort }))
+      const result = yield* next({ ...e, model, effort })
+      await setStatusLine($, c, statusLineText({ config: c.config, settings, model, effort, actualModel: result.usage?.model ?? null }))
+      return result
+    }
     if (settings?.off) {
       await setStatusLine($, c, 'TSR OFF')
       yield* next(e)
@@ -826,6 +837,21 @@ const registerCommandsAndPane = (on: Parameters<Register>[0]) => {
     if (arg === 'hungry' || arg === 'normal') {
       await $.state.set(settingsRef, { ...s, hungry: arg === 'hungry' })
       return { text: arg === 'hungry' ? 'hungry 모드(가칭): 이 세션은 예산과 상관없이 모든 턴을 최상 등급으로 보냅니다.' : 'hungry 모드를 해제했습니다.' }
+    }
+    if (arg === 'pin') {
+      const parts = e.args.trim().split(/\s+/)
+      const model = parts[1]
+      const effort = parts[2]
+      if (!model || !MODELS.includes(model) || !effort || !EFFORTS.includes(effort)) {
+        return { text: `사용법: /tsr-router pin <${MODELS.join('|')}> <${EFFORTS.join('|')}>` }
+      }
+      await $.state.set(settingsRef, { ...s, pin: { model, effort } })
+      return { text: `이 세션을 ${model}/${effort}로 고정했습니다 (설정 파일은 안 건드림, off보다 우선 적용). 해제하려면 /tsr-router unpin` }
+    }
+    if (arg === 'unpin') {
+      const { pin, ...rest } = s
+      await $.state.set(settingsRef, rest)
+      return { text: pin ? '고정을 해제했습니다. 원래(auto/manual) 라우팅으로 돌아갑니다.' : '고정돼 있지 않습니다.' }
     }
     if (arg === 'reset') {
       const keys: string[] = await $.store.keys().catch(() => [])

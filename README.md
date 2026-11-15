@@ -128,9 +128,13 @@ claude --plugin-dir .
 | `/tsr-router status` | 상태를 텍스트로 보기 |
 | `/tsr-router off` / `on` | 현재 세션의 라우팅 끄기 / 켜기 |
 | `/tsr-router hungry` / `normal` | 이번 세션을 상 등급 고정 / 해제 |
+| `/tsr-router pin <모델> <effort>` | 이번 세션만 즉석으로 모델/effort 고정 (설정 파일은 안 건드림, `off`보다 우선) |
+| `/tsr-router unpin` | 고정 해제, 원래(auto/manual) 라우팅으로 복귀 |
 | `/tsr-router setup` | 온보딩 설정 다시 열기 |
 | `/tsr-router export` | 팀 공유용 보정 통계를 프로젝트 파일에 내보내기 |
 | `/tsr-docs` | 주요 지침 문서가 가리키는 경로 존재 여부 검사 |
+
+매 턴마다 터미널 상태줄에 `TSR {모드} | Selected: {모델}/{effort}`가 뜨고, 실제 서빙된 모델을 확인하면 `| Actual: {모델}`이 붙습니다. `{모드}`는 `pin`(고정) > `off` > `hungry` > `auto`/`manual` 순으로 우선순위가 높은 쪽이 표시됩니다. 설정에서 `statusLine.enabled: false`로 끌 수 있습니다(라우팅 자체는 그대로 동작, 상태줄 호출만 생략).
 
 ## 설정
 
@@ -148,7 +152,8 @@ claude --plugin-dir .
     "최상": { "model": "opus", "effort": "high" }
   },
   "budget": { "enabled": false, "dailyUsd": 20, "warnPct": 70, "savePct": 90 },
-  "calibration": { "enabled": false }
+  "calibration": { "enabled": false },
+  "statusLine": { "enabled": true }
 }
 ```
 

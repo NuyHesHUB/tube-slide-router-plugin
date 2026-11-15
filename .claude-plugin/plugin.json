@@ -1,0 +1,11 @@
+{
+  "name": "tube-slide-router",
+  "version": "0.1.0",
+  "description": "Judges each turn's difficulty with the session's own model and routes it to the right model and effort, with no external service and measured (not estimated) outcomes.",
+  "author": {
+    "name": "Lazy Hoodie"
+  },
+  "license": "MIT",
+  "icon": ".claude-plugin/icon.png",
+  "types": "./types/index.d.ts"
+}

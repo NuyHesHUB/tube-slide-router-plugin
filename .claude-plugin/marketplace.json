@@ -1,0 +1,12 @@
+{
+  "name": "tube-slide-router",
+  "owner": {
+    "name": "NuyHesHUB"
+  },
+  "plugins": [
+    {
+      "name": "tube-slide-router",
+      "source": "./"
+    }
+  ]
+}

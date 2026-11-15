@@ -12,13 +12,14 @@ import {
   ambiguous, appendJevRecord, comparisonRecord, isPolicyRefusal, JEV_ENDPOINT, JEV_ENV_FILE, JEV_ENV_KEY,
   JevMalformedError, JEV_TIMEOUT_MS, parseEnvFile, summarizeJevComparisons,
 } from '../lib/jev.mjs'
+import { armOutcome, buildCompareArgs, compareReportText, extractCompareFields } from '../lib/compare.mjs'
 import { addToolCall, appendRecord, changedLinesOf, checkOutcome, emptyTally, STEP_CAP, stepRecord, turnRecord } from '../lib/observed.mjs'
 import { bandAdvisories, contextNote, decideRoute, downgradeAdvisories, pathsIn, preflightDecision as computePreflightDecision } from '../lib/policy.mjs'
 import { requestCostUsd } from '../lib/prices.mjs'
 import { buildTelemetryRecord, formatTelemetryLine, telemetryPath } from '../lib/telemetry.mjs'
 import {
   addToBandCal, addToCal, calKey, costKey, costKeysOf, emptyBandCal, emptyCal, jevKey, keysToPrune, localDay,
-  resetSummary, resettableKeys, stepsKey, sumBandCals, sumCals, turnsKey, usageKey,
+  projectHash, resetSummary, resettableKeys, stepsKey, sumBandCals, sumCals, turnsKey, usageKey,
 } from '../lib/store.mjs'
 import { appendUsage, latestUsage, usageSnapshot } from '../lib/usage.mjs'
 import { HELP, LOGO, riskAreasText, routeLine, statusLineText, statusText, TAGLINE, tierHint } from '../lib/view.mjs'
@@ -34,6 +35,7 @@ type Ctx = {
   paths: { profile: string; project: string }
   root: string
   home: string
+  projHash: string
   calStats: ReturnType<typeof emptyCal>
   bandStats: ReturnType<typeof emptyBandCal>
 }
@@ -72,6 +74,7 @@ const loadCtx = async ($: any): Promise<Ctx> => {
   const home = (await $.env.get('HOME')) ?? ''
   const configDir = (await $.env.get('CLAUDE_CONFIG_DIR')) ?? `${home}/.claude`
   const root = await $.session.root()
+  const projHash = projectHash(root)
   const paths = configPaths({ configDir, root })
   const profile = await readJsonFile($, paths.profile)
   const project = await readJsonFile($, paths.project)
@@ -83,14 +86,18 @@ const loadCtx = async ($: any): Promise<Ctx> => {
   const keys: string[] = await $.store.keys().catch(() => [])
   const local = []
   const localBands = []
-  for (const k of keys.filter((k) => k.startsWith('tsr-cal:'))) {
+  // 2026-11-15: scoped to this project (tsr-cal:<projHash>:<sid>) — see store.mjs's module doc
+  // comment. A key from before this change (plain tsr-cal:<sid>, no projHash segment) never
+  // matches this prefix, so it ages out of every project's aggregation via the existing prune
+  // schedule instead of being migrated (there was never a project identity to migrate from).
+  for (const k of keys.filter((k) => k.startsWith(`tsr-cal:${projHash}:`))) {
     const v = (await $.store.get(k)) as any
     local.push(v?.tiers)
     localBands.push(v?.bands)
   }
   const calStats = sumCals(local)
   const bandStats = sumBandCals(localBands)
-  return { config, errors, configSource, paths, root, home, calStats, bandStats }
+  return { config, errors, configSource, paths, root, home, projHash, calStats, bandStats }
 }
 
 const ensureCtx = async ($: any) => (ctx ??= await loadCtx($))
@@ -110,17 +117,17 @@ const pruneStore = async ($: any, own: string) => {
   for (const key of keysToPrune({ keys, entries, now: Date.now(), own })) await $.store.delete(key).catch(() => {})
 }
 
-const spentToday = async ($: any) => {
+const spentToday = async ($: any, projHash: string) => {
   const keys: string[] = await $.store.keys().catch(() => [])
   let total = 0
-  for (const k of costKeysOf(keys, localDay(Date.now()))) {
+  for (const k of costKeysOf(keys, localDay(Date.now()), projHash)) {
     const v = await $.store.get(k).catch(() => 0)
     if (typeof v === 'number') total += v
   }
   return total
 }
 
-const recordStep = async ($: any, e: any, requested: string, result: any) => {
+const recordStep = async ($: any, e: any, requested: string, result: any, projHash: string) => {
   const sid = await $.session.id()
   const at = Date.now()
   const key = stepsKey(sid)
@@ -128,7 +135,7 @@ const recordStep = async ($: any, e: any, requested: string, result: any) => {
   await $.store.set(key, [...rows, stepRecord({ turnId: e.turnId, index: e.index, requested, usage: result.usage, at })].slice(-STEP_CAP))
   const cost = requestCostUsd(result.usage?.model, result.usage)
   if (cost !== null) {
-    const ck = costKey(localDay(at), sid)
+    const ck = costKey(localDay(at), projHash, sid)
     const prev = await $.store.get(ck)
     await $.store.set(ck, (typeof prev === 'number' ? prev : 0) + cost)
   }
@@ -202,7 +209,7 @@ async function* classifierFailureFallback(
   const result = yield* next({ ...e, model: route.model, effort: route.effort })
   log(`served: step 0 requested=${route.model} served=${result.usage?.model ?? 'unknown'}`)
   await setStatusLine($, c, statusLineText({ config: c.config, settings, model: route.model, effort: route.effort, tier: route.tier, actualModel: result.usage?.model ?? null }))
-  await recordStep($, e, route.model, result).catch(() => {})
+  await recordStep($, e, route.model, result, c.projHash).catch(() => {})
   return result
 }
 
@@ -492,7 +499,7 @@ export const register: Register = (on, options) => {
       const result = yield* next({ ...e, model: route.model, effort: route.effort })
       log(`served: step ${e.index} requested=${route.model} served=${result.usage?.model ?? 'unknown'}`)
       await setStatusLine($, c, statusLineText({ config: c.config, settings, model: route.model, effort: route.effort, escalatedFrom, tier: route.tier, actualModel: result.usage?.model ?? null }))
-      await recordStep($, e, route.model, result).catch(() => {})
+      await recordStep($, e, route.model, result, c.projHash).catch(() => {})
       return result
     }
 
@@ -552,7 +559,7 @@ export const register: Register = (on, options) => {
     if (c.config.preflight.enabled && !c.config.preflight.shadowMode && preflightDecision === 'fast_path') {
       classificationSkipped = true
       const { value: previous } = await $.state.get({ plugin: 'tube-slide-router', key: 'lastRoute' })
-      const spentUsd = c.config.budget.enabled ? await spentToday($) : 0
+      const spentUsd = c.config.budget.enabled ? await spentToday($, c.projHash) : 0
       let { route } = decideRoute({
         classified: '중', config: c.config, previous: previous ?? null, stats: c.calStats, spentUsd,
         hungry: false, paths, ambiguitySource: null, confidence: null, collectorFailed: false,
@@ -590,7 +597,7 @@ export const register: Register = (on, options) => {
       const result = yield* next({ ...e, model: route.model, effort: route.effort })
       log(`served: step 0 requested=${route.model} served=${result.usage?.model ?? 'unknown'} [preflight fast_path]`)
       await setStatusLine($, c, statusLineText({ config: c.config, settings, model: route.model, effort: route.effort, tier: route.tier, actualModel: result.usage?.model ?? null }))
-      await recordStep($, e, route.model, result).catch(() => {})
+      await recordStep($, e, route.model, result, c.projHash).catch(() => {})
       return result
     }
     // === End P0-A fast path ===
@@ -600,7 +607,7 @@ export const register: Register = (on, options) => {
     if (!builtinEngine.healthy(health)) {
       if (c.config.mode === 'auto') {
         const { value: previous } = await $.state.get({ plugin: 'tube-slide-router', key: 'lastRoute' })
-        const spentUsd = c.config.budget.enabled ? await spentToday($) : 0
+        const spentUsd = c.config.budget.enabled ? await spentToday($, c.projHash) : 0
         return yield* classifierFailureFallback($, e, next, {
           c, settings, previous, spentUsd, paths, collectorFailed: false, log,
           reasonLabel: 'built-in classifier temporarily paused after repeated failures',
@@ -673,7 +680,7 @@ export const register: Register = (on, options) => {
       await $.state.set(healthRef, builtinEngine.failed(health))
       if (c.config.mode === 'auto') {
         const { value: previous } = await $.state.get({ plugin: 'tube-slide-router', key: 'lastRoute' })
-        const spentUsd = c.config.budget.enabled ? await spentToday($) : 0
+        const spentUsd = c.config.budget.enabled ? await spentToday($, c.projHash) : 0
         return yield* classifierFailureFallback($, e, next, {
           c, settings, previous, spentUsd, paths, collectorFailed, log,
           reasonLabel: 'no usable built-in label',
@@ -686,7 +693,7 @@ export const register: Register = (on, options) => {
     await $.state.set(healthRef, builtinEngine.succeeded())
     const { label, provider } = classified
     const { value: previous } = await $.state.get({ plugin: 'tube-slide-router', key: 'lastRoute' })
-    const spentUsd = c.config.budget.enabled ? await spentToday($) : 0
+    const spentUsd = c.config.budget.enabled ? await spentToday($, c.projHash) : 0
     // assist needs its ambiguity signal before the route is decided (it may nudge effort), so
     // this is awaited here instead of running concurrently like shadow's. The known cost of
     // turning assist on is this one request's latency, capped at JEV_TIMEOUT_MS.
@@ -753,7 +760,7 @@ export const register: Register = (on, options) => {
     const result = yield* next({ ...e, model: route.model, effort: route.effort })
     log(`served: step 0 requested=${route.model} served=${result.usage?.model ?? 'unknown'}`)
     await setStatusLine($, c, statusLineText({ config: c.config, settings, model: route.model, effort: route.effort, tier: route.tier, actualModel: result.usage?.model ?? null }))
-    await recordStep($, e, route.model, result).catch(() => {})
+    await recordStep($, e, route.model, result, c.projHash).catch(() => {})
     if (jevPromise) await jevPromise
     return result
   })
@@ -809,8 +816,8 @@ const recordTurn = async ($: any, e: any) => {
     const sid = await $.session.id()
     const rows = ((await $.store.get(turnsKey(sid))) as unknown[] | undefined) ?? []
     await $.store.set(turnsKey(sid), appendRecord(rows, record))
-    const cal = (await $.store.get(calKey(sid))) as any
-    await $.store.set(calKey(sid), {
+    const cal = (await $.store.get(calKey(c.projHash, sid))) as any
+    await $.store.set(calKey(c.projHash, sid), {
       updatedAt: Date.now(),
       tiers: addToCal(cal?.tiers ?? emptyCal(), record),
       bands: addToBandCal(cal?.bands ?? emptyBandCal(), record),
@@ -856,13 +863,13 @@ const registerCommandsAndPane = (on: Parameters<Register>[0]) => {
     }
     if (arg === 'reset') {
       const keys: string[] = await $.store.keys().catch(() => [])
-      const toDelete = resettableKeys(keys)
+      const toDelete = resettableKeys(keys, c.projHash)
       if (e.args.trim().split(/\s+/)[1] !== 'confirm') {
-        const summary = resetSummary(keys)
+        const summary = resetSummary(keys, c.projHash)
         const lines = Object.entries(summary).filter(([, n]) => (n as number) > 0).map(([p, n]) => `${p} ${n as number}개`)
         return {
           text:
-            `이 기기에 쌓인 턴·사용량·보정·Jev 비교 기록을 전부 지웁니다(다른 세션 것 포함, 총 ${toDelete.length}개 키).\n` +
+            `턴·사용량·Jev 비교 기록은 이 기기 전체(다른 세션 것 포함)를, 보정·비용 기록은 이 프로젝트 것만 지웁니다(2026-11-15부터 보정·비용은 프로젝트별로 나뉩니다 — 턴·사용량·Jev 기록은 어느 프로젝트 것인지 구분할 정보가 원래 없어 기기 전체 대상입니다). 총 ${toDelete.length}개 키.\n` +
             (lines.length ? lines.join(', ') + '\n' : '(지울 기록이 없습니다)\n') +
             `설정 파일은 지우지 않습니다.\n` +
             `정말 지우려면 /tsr-router reset confirm`,
@@ -902,6 +909,39 @@ const registerCommandsAndPane = (on: Parameters<Register>[0]) => {
       }
       return { text: '사용법: /tsr-router risk list | risk add <폴더이름> <등급> | risk remove <폴더이름>' }
     }
+    if (arg === 'compare') {
+      const prompt = e.args.trim().replace(/^compare\s*/, '').trim()
+      if (!prompt) return { text: '사용법: /tsr-router compare <프롬프트> (같은 작업을 고정 모델/TSR 라우팅 둘 다로 실행해 비교합니다 — 실제 과금 발생, git 저장소 전용)' }
+      const inWorkTree = await $.process.run(['git', 'rev-parse', '--is-inside-work-tree'], { cwd: c.root }).catch(() => null)
+      if (!inWorkTree || inWorkTree.exitCode !== 0) return { text: 'compare는 git 저장소에서만 지원합니다 — 이 프로젝트는 git 저장소가 아닙니다.' }
+      const status = await $.process.run(['git', 'status', '--porcelain'], { cwd: c.root }).catch(() => null)
+      if (!status) return { text: 'git 상태를 확인하지 못해 compare를 중단했습니다.' }
+      if (status.stdout.trim() !== '') return { text: 'compare를 돌리기 전에 커밋되지 않은 변경사항을 먼저 커밋하거나 stash 하세요 (git status --porcelain이 비어있지 않습니다). 각 아암이 별도 워크트리(HEAD 기준)에서 실행되므로, 지금 작업 중인 내용은 반영되지 않습니다.' }
+      const base = `${c.home}/.cache/tube-slide-router/compare`
+      const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+      const baselineDir = `${base}/${stamp}-baseline`
+      const routerDir = `${base}/${stamp}-router`
+      const mk = await $.process.run(['mkdir', '-p', base]).catch((e2: any) => ({ exitCode: 1, stderr: String(e2?.message ?? e2) }))
+      if (mk.exitCode !== 0) return { text: `작업공간을 만들지 못했습니다: ${mk.stderr}` }
+      for (const dir of [baselineDir, routerDir]) {
+        const added = await $.process.run(['git', 'worktree', 'add', dir, 'HEAD'], { cwd: c.root }).catch((e2: any) => ({ exitCode: 1, stderr: String(e2?.message ?? e2) }))
+        if (added.exitCode !== 0) return { text: `워크트리를 만들지 못했습니다(${dir}): ${added.stderr}` }
+      }
+      const { baseline: baselineInvocation, router: routerInvocation } = buildCompareArgs({ prompt, pluginRoot: $.plugin.root })
+      const runArm = async (dir: string, invocation: { bin: string; args: string[] }) => {
+        try {
+          const result = await $.process.run([invocation.bin, ...invocation.args], { cwd: dir, timeoutMs: 600000 })
+          if (result.exitCode !== 0) return armOutcome({ error: `종료 코드 ${result.exitCode}: ${result.stderr.slice(0, 500)}`, dir })
+          return armOutcome({ fields: extractCompareFields(JSON.parse(result.stdout)), dir })
+        } catch (e2: any) {
+          return armOutcome({ error: String(e2?.message ?? e2), dir })
+        }
+      }
+      // Sequential (Phase 1 — see benchmark/compare-mode-DESIGN.md roadmap; parallel is Phase 2).
+      const baselineResult = await runArm(baselineDir, baselineInvocation)
+      const routerResult = await runArm(routerDir, routerInvocation)
+      return { text: compareReportText({ prompt, baseline: baselineResult, router: routerResult }) }
+    }
     const sid = await $.session.id()
     const turns = ((await $.store.get(turnsKey(sid))) as any[] | undefined) ?? []
     const { value: classifierHealth } = await $.state.get({ plugin: 'tube-slide-router', key: 'classifierHealth' })
@@ -911,7 +951,7 @@ const registerCommandsAndPane = (on: Parameters<Register>[0]) => {
         : undefined
     const usageRows = ((await $.store.get(usageKey(sid))) as any[] | undefined) ?? []
     const status = statusText({
-      config: c.config, settings: s, spentTodayUsd: await spentToday($), turns, errors: c.errors, configSource: c.configSource, classifierHealth, jevSummary,
+      config: c.config, settings: s, spentTodayUsd: await spentToday($, c.projHash), turns, errors: c.errors, configSource: c.configSource, classifierHealth, jevSummary,
       downgradeNotes: downgradeAdvisories(c.calStats, c.config.downgrade), bandNotes: bandAdvisories(c.bandStats, c.config.bandCalibration),
       usage: latestUsage(usageRows),
     })
@@ -1028,7 +1068,7 @@ const registerCommandsAndPane = (on: Parameters<Register>[0]) => {
         : undefined
     const usageRows = ((await $.store.get(usageKey(sid))) as any[] | undefined) ?? []
     const text = statusText({
-      config: c.config, settings: settings ?? {}, spentTodayUsd: await spentToday($), turns, errors: c.errors, configSource: c.configSource, classifierHealth, jevSummary,
+      config: c.config, settings: settings ?? {}, spentTodayUsd: await spentToday($, c.projHash), turns, errors: c.errors, configSource: c.configSource, classifierHealth, jevSummary,
       downgradeNotes: downgradeAdvisories(c.calStats, c.config.downgrade), bandNotes: bandAdvisories(c.bandStats, c.config.bandCalibration),
       usage: latestUsage(usageRows),
     })

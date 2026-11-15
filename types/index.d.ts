@@ -165,7 +165,7 @@ declare module 'claude-code' {
       turnTools: StateFamily<TurnTally>
       currentTurnId: string
       lastRoute: { tier: Tier; model: string; effort: Effort }
-      settings: { off?: boolean; hungry?: boolean }
+      settings: { off?: boolean; hungry?: boolean; pin?: { model: string; effort: Effort } }
       classifierHealth: { failures: number; pausedUntil: number }
       jevHealth: { failures: number; pausedUntil: number }
       pane: { view: string; draft: PaneDraft }

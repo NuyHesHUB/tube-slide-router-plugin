@@ -17,12 +17,12 @@ import { bandAdvisories, contextNote, decideRoute, downgradeAdvisories, pathsIn,
 import { requestCostUsd } from '../lib/prices.mjs'
 import { buildTelemetryRecord, formatTelemetryLine, telemetryPath } from '../lib/telemetry.mjs'
 import {
-  addToBandCal, addToCal, calKey, costKey, costKeysOf, emptyBandCal, emptyCal, jevKey, keysToPrune, localDay, ONBOARDED_KEY,
+  addToBandCal, addToCal, calKey, costKey, costKeysOf, emptyBandCal, emptyCal, jevKey, keysToPrune, localDay,
   resetSummary, resettableKeys, stepsKey, sumBandCals, sumCals, turnsKey, usageKey,
 } from '../lib/store.mjs'
 import { appendUsage, latestUsage, usageSnapshot } from '../lib/usage.mjs'
 import { HELP, LOGO, riskAreasText, routeLine, statusLineText, statusText, TAGLINE, tierHint } from '../lib/view.mjs'
-import type { PaneDraft, Tier, TurnRoute } from '../types'
+import type { Effort, PaneDraft, Tier, TurnRoute } from '../types'
 
 const PANE = 'tsr-router'
 
@@ -38,6 +38,11 @@ type Ctx = {
   bandStats: ReturnType<typeof emptyBandCal>
 }
 let ctx: Ctx | null = null
+// Set once at the top of register(on, options) and read by loadCtx below. A plain module
+// variable (not threaded through every loadCtx call site) because options only ever change via
+// a full module reload (the engine reloads the whole module on a /config change to a userConfig
+// field — "module variables start over" — so this is never stale within one load).
+let pluginOptions: Record<string, unknown> = {}
 
 const quiet = (config: typeof DEFAULTS) => (config.debug ? undefined : ({ to: 'debug' } as const))
 
@@ -70,7 +75,7 @@ const loadCtx = async ($: any): Promise<Ctx> => {
   const paths = configPaths({ configDir, root })
   const profile = await readJsonFile($, paths.profile)
   const project = await readJsonFile($, paths.project)
-  const { config, errors } = effectiveConfig(profile.value, project.value)
+  const { config, errors } = effectiveConfig(profile.value, project.value, pluginOptions)
   if (profile.error) errors.push(`프로필 파일: ${profile.error}`)
   if (project.error) errors.push(`프로젝트 파일: ${project.error}`)
   const configSource = project.exists ? '프로젝트 파일' : profile.exists ? '프로필 파일' : '기본값'
@@ -360,7 +365,8 @@ const draftFrom = (config: typeof DEFAULTS): PaneDraft => ({
 
 const setPane = ($: any, view: string, draft: PaneDraft) => $.state.set({ plugin: 'tube-slide-router', key: 'pane' }, { view, draft })
 
-export const register: Register = (on) => {
+export const register: Register = (on, options) => {
+  pluginOptions = options ?? {}
   on('session.start', async ($, e, next) => {
     await $.command.register({
       name: 'tsr-router',
@@ -376,24 +382,13 @@ export const register: Register = (on) => {
     })
     ctx = await loadCtx($)
     await pruneStore($, await $.session.id()).catch(() => {})
-    if (e.isInteractive && !(await $.store.get(ONBOARDED_KEY)) && ctx.configSource === '기본값') {
-      await setPane($, 'welcome', draftFrom(ctx.config))
-      const opened = await $.ui.open({ id: PANE, title: 'Tube Slide Router', focus: true }).catch(() => null)
-      if (!(opened && 'isPlaced' in opened && opened.isPlaced)) {
-        // Narrow terminal, or any other reason the pane could not be placed: never fail silently.
-        // The pane state is already 'welcome', so /tsr-router (or a future wider session, since we
-        // do not mark onboarding done here) opens straight into it.
-        $.ui.toast('Tube Slide Router: 자동 모드(기본 등급표)로 시작합니다. 설정을 보려면 /tsr-router 를 입력하세요.')
-      }
-      // ONBOARDED_KEY is NOT set here just because the pane rendered (`isPlaced`) — that only
-      // means the terminal had room to draw it, not that the user did anything with it. Setting
-      // it here caused a real bug: a session where the panel opened but focus was broken (or the
-      // user simply hadn't acted on it yet) got marked onboarded anyway, so the NEXT session
-      // skipped auto-opening it entirely with no way back in except the undocumented
-      // /tsr-router setup escape hatch. ONBOARDED_KEY is set only where the user actually
-      // finishes or explicitly dismisses the wizard — see the welcome/budget/done view button
-      // handlers below (ui.render's Pane).
-    }
+    // No more auto-opened "welcome" wizard here — plugin.json's userConfig (mode/statusLine/
+    // calibration/budget) now covers what that first screen used to ask, through the engine's
+    // own install-time setup screen and /config menu (see mod/HANDOFF.md's userConfig section
+    // for what that did and did not replace, and the bug this removes: ONBOARDED_KEY used to be
+    // set just because the pane rendered, not because the user did anything with it). The
+    // welcome/tiers/budget/done views still exist and are still reachable by hand
+    // (/tsr-router setup) for routes/riskAreas, which userConfig can't express (nested shapes).
     return next(e)
   })
 
@@ -851,7 +846,7 @@ const registerCommandsAndPane = (on: Parameters<Register>[0]) => {
       if (!model || !MODELS.includes(model) || !effort || !EFFORTS.includes(effort)) {
         return { text: `사용법: /tsr-router pin <${MODELS.join('|')}> <${EFFORTS.join('|')}>` }
       }
-      await $.state.set(settingsRef, { ...s, pin: { model, effort } })
+      await $.state.set(settingsRef, { ...s, pin: { model, effort: effort as Effort } })
       return { text: `이 세션을 ${model}/${effort}로 고정했습니다 (설정 파일은 안 건드림, off보다 우선 적용). 해제하려면 /tsr-router unpin` }
     }
     if (arg === 'unpin') {
@@ -960,14 +955,6 @@ const registerCommandsAndPane = (on: Parameters<Register>[0]) => {
     const draft: PaneDraft = value?.draft ?? draftFrom(c.config)
     const go = (v: string, d: PaneDraft = draft) => void setPane($, v, d)
     const close = () => void $.ui.close({ id: PANE }).catch(() => {})
-    // Marks onboarding done AND closes the pane — only ever wired to a button the user actually
-    // pressed to leave the wizard (welcome's "나중에", done/error's "닫기"), never to the regular
-    // status pane's own close button below. This is the one place ONBOARDED_KEY is set now —
-    // see turn.start's comment for why "the pane merely rendered" is not good enough.
-    const closeOnboarded = () => void (async () => {
-      await $.store.set(ONBOARDED_KEY, true)
-      await $.ui.close({ id: PANE }).catch(() => {})
-    })()
     const col = (...children: unknown[]) => h(Box, { flexDirection: 'column', gap: 1 }, ...children)
     const row = (...children: unknown[]) => h(Box, { flexDirection: 'row', gap: 2 }, ...children)
     const options = (list: readonly (string | number)[], fmt = (v: string | number) => String(v)) => list.map((v) => ({ value: String(v), label: fmt(v) }))
@@ -979,7 +966,7 @@ const registerCommandsAndPane = (on: Parameters<Register>[0]) => {
         h(Text, { bold: true }, '처음 오셨네요. 라우팅을 어떻게 시작할까요?'),
         h(Button, { key: 'auto', variant: 'primary', onPress: () => go('budget', { ...draft, mode: 'auto', routes: structuredClone(DEFAULTS.routes) as PaneDraft['routes'] }) }, '자동 모드 (추천) — 기본 등급표로 바로 시작'),
         h(Button, { key: 'manual', onPress: () => go('tiers', { ...draft, mode: 'manual' }) }, '수동 설정 — 등급별 모델·effort를 직접 고름'),
-        h(Button, { key: 'later', role: 'dismiss', onPress: closeOnboarded }, '나중에 (자동 모드로 시작)'),
+        h(Button, { key: 'later', role: 'dismiss', onPress: close }, '나중에 (자동 모드로 시작)'),
       )
     }
     if (view === 'tiers') {
@@ -1018,8 +1005,8 @@ const registerCommandsAndPane = (on: Parameters<Register>[0]) => {
           : null,
         h(Text, { dimColor: true }, '예산과 상관없이 최상위 등급을 쓰고 싶을 땐 /tsr-router hungry (가칭)'),
         row(
-          h(Button, { key: 'save', variant: 'primary', onPress: () => void saveProfile($, draft).then(() => $.store.set(ONBOARDED_KEY, true)).then(() => go('done')).catch(() => go('error')) }, '저장하고 시작'),
-          h(Button, { key: 'skip', onPress: () => void saveProfile($, { ...draft, budget: { ...b, enabled: false } }).then(() => $.store.set(ONBOARDED_KEY, true)).then(() => go('done')).catch(() => go('error')) }, '예산 가드 없이 저장'),
+          h(Button, { key: 'save', variant: 'primary', onPress: () => void saveProfile($, draft).then(() => go('done')).catch(() => go('error')) }, '저장하고 시작'),
+          h(Button, { key: 'skip', onPress: () => void saveProfile($, { ...draft, budget: { ...b, enabled: false } }).then(() => go('done')).catch(() => go('error')) }, '예산 가드 없이 저장'),
         ),
       )
     }
@@ -1028,7 +1015,7 @@ const registerCommandsAndPane = (on: Parameters<Register>[0]) => {
         h(Text, { bold: true }, view === 'done' ? '설정 완료 ✓' : '설정 파일을 쓰지 못했습니다. 기본값으로 계속 동작합니다.'),
         h(Text, {}, routeLine(c.config.routes)),
         h(Text, {}, '지금부터 작업 난이도에 맞춰 자동 전환됩니다. 나중에 /tsr-router 로 다시 열 수 있어요.'),
-        h(Button, { key: 'close', variant: 'primary', role: 'dismiss', onPress: closeOnboarded }, '닫기'),
+        h(Button, { key: 'close', variant: 'primary', role: 'dismiss', onPress: close }, '닫기'),
       )
     }
     const { value: settings } = await $.state.get({ plugin: 'tube-slide-router', key: 'settings' })

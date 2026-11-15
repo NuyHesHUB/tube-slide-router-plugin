@@ -7,5 +7,38 @@
   },
   "license": "MIT",
   "icon": ".claude-plugin/icon.png",
-  "types": "./types/index.d.ts"
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "mode": {
+      "type": "string",
+      "title": "등급표 출처",
+      "description": "auto는 기본 등급표(ABL-EB), manual은 프로필/프로젝트 설정 파일의 routes를 씀",
+      "default": "auto",
+      "options": ["auto", "manual"]
+    },
+    "statusLineEnabled": {
+      "type": "boolean",
+      "title": "상태줄 표시",
+      "description": "매 턴 선택/실제 모델·effort를 터미널 상태줄에 표시",
+      "default": true
+    },
+    "calibrationEnabled": {
+      "type": "boolean",
+      "title": "자동 보정",
+      "description": "승급 기록이 쌓이면 등급을 자동으로 올리는 보정 기능(기본 꺼짐 — 실측 데이터가 충분히 쌓인 뒤에만 켜는 걸 권장)",
+      "default": false
+    },
+    "budgetEnabled": {
+      "type": "boolean",
+      "title": "예산 가드",
+      "description": "하루 API 환산 비용이 임계치를 넘으면 등급 상한을 자동으로 낮추는 예산 가드",
+      "default": false
+    },
+    "budgetDailyUsd": {
+      "type": "number",
+      "title": "하루 예산(달러)",
+      "description": "예산 가드가 켜져 있을 때 하루 상한(달러, API 환산)",
+      "default": 20
+    }
+  }
 }

@@ -130,13 +130,17 @@ claude --plugin-dir .
 | `/tsr-router hungry` / `normal` | 이번 세션을 상 등급 고정 / 해제 |
 | `/tsr-router pin <모델> <effort>` | 이번 세션만 즉석으로 모델/effort 고정 (설정 파일은 안 건드림, `off`보다 우선) |
 | `/tsr-router unpin` | 고정 해제, 원래(auto/manual) 라우팅으로 복귀 |
-| `/tsr-router setup` | 온보딩 설정 다시 열기 |
+| `/tsr-router setup` | 등급표·예산 설정 패널 열기 (세션 시작 시 자동으로 뜨지 않음 — 간단한 값은 `/config`, `routes`처럼 중첩된 값은 이 패널이나 설정 파일) |
 | `/tsr-router export` | 팀 공유용 보정 통계를 프로젝트 파일에 내보내기 |
 | `/tsr-docs` | 주요 지침 문서가 가리키는 경로 존재 여부 검사 |
 
 매 턴마다 터미널 상태줄에 `TSR {모드} | Selected: {모델}/{effort}`가 뜨고, 실제 서빙된 모델을 확인하면 `| Actual: {모델}`이 붙습니다. `{모드}`는 `pin`(고정) > `off` > `hungry` > `auto`/`manual` 순으로 우선순위가 높은 쪽이 표시됩니다. 설정에서 `statusLine.enabled: false`로 끌 수 있습니다(라우팅 자체는 그대로 동작, 상태줄 호출만 생략).
 
 ## 설정
+
+가장 가벼운 설정 경로는 Claude Code의 `/config` 메뉴입니다. 플러그인을 로드하면 `mode`(등급표 출처), `statusLineEnabled`(상태줄 표시), `calibrationEnabled`(자동 보정), `budgetEnabled`/`budgetDailyUsd`(예산 가드) 다섯 항목이 메뉴에 뜹니다. 별도 파일을 만들지 않고 바로 켜고 끌 수 있고, 값은 세션이 아니라 계정에 저장되어 다음 세션에도 유지됩니다.
+
+`routes`(등급별 모델/effort 매핑)와 `riskAreas`는 중첩 구조라 `/config`로 표현할 수 없어, 여전히 아래 설정 파일에서만 바꿀 수 있습니다. 우선순위는 기본값 < `/config` < 프로필 파일 < 프로젝트 파일 순이며, 더 구체적인 범위가 항상 이깁니다.
 
 프로필 설정은 `$CLAUDE_CONFIG_DIR/tube-slide-router.json`(기본값 `~/.claude/…`)에, 프로젝트 설정은 `<프로젝트>/.claude/tube-slide-router.json`에 둡니다. 프로젝트 설정이 우선합니다.
 

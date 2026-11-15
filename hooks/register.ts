@@ -21,7 +21,7 @@ import {
   resetSummary, resettableKeys, stepsKey, sumBandCals, sumCals, turnsKey, usageKey,
 } from '../lib/store.mjs'
 import { appendUsage, latestUsage, usageSnapshot } from '../lib/usage.mjs'
-import { HELP, LOGO, riskAreasText, routeLine, statusText, TAGLINE, tierHint } from '../lib/view.mjs'
+import { HELP, LOGO, riskAreasText, routeLine, statusLineText, statusText, TAGLINE, tierHint } from '../lib/view.mjs'
 import type { PaneDraft, Tier, TurnRoute } from '../types'
 
 const PANE = 'tsr-router'
@@ -40,6 +40,20 @@ type Ctx = {
 let ctx: Ctx | null = null
 
 const quiet = (config: typeof DEFAULTS) => (config.debug ? undefined : ({ to: 'debug' } as const))
+
+// Terminal status line (실사용 통합 지침서): opt-out via config.statusLine.enabled (default
+// true) — routing itself is unaffected either way, only this call is skipped when off.
+// $.ui.status(undefined) clears it; failures are swallowed (a status line is cosmetic, never
+// worth failing a turn over).
+const setStatusLine = async ($: any, c: Ctx, text: string | undefined) => {
+  if (!c.config.statusLine.enabled) return
+  try {
+    await $.ui.status(text)
+  } catch {
+    // cosmetic only — never worth failing a turn over (also covers an engine/test harness
+    // that doesn't implement $.ui.status at all)
+  }
+}
 
 const readJsonFile = async ($: any, path: string) => {
   if (!(await $.fs.exists(path).catch(() => false))) return { value: undefined, exists: false }
@@ -179,8 +193,10 @@ async function* classifierFailureFallback(
     let _prev = ''; try { _prev = await $.fs.read(_path) } catch {}
     await $.fs.write(_path, _prev + formatTelemetryLine(_rec) + '\n').catch(() => {})
   }
+  await setStatusLine($, c, statusLineText({ config: c.config, settings, model: route.model, effort: route.effort }))
   const result = yield* next({ ...e, model: route.model, effort: route.effort })
   log(`served: step 0 requested=${route.model} served=${result.usage?.model ?? 'unknown'}`)
+  await setStatusLine($, c, statusLineText({ config: c.config, settings, model: route.model, effort: route.effort, actualModel: result.usage?.model ?? null }))
   await recordStep($, e, route.model, result).catch(() => {})
   return result
 }
@@ -408,11 +424,12 @@ export const register: Register = (on) => {
       return
     }
     const { value: settings } = await $.state.get({ plugin: 'tube-slide-router', key: 'settings' })
+    const c = await ensureCtx($)
     if (settings?.off) {
+      await setStatusLine($, c, 'TSR OFF')
       yield* next(e)
       return
     }
-    const c = await ensureCtx($)
     const log = (text: string) => $.ui.log(`[tube-slide-router] ${text}`, quiet(c.config))
     const ref = { plugin: 'tube-slide-router', key: 'turnRoutes', id: e.turnId } as const
 
@@ -458,8 +475,11 @@ export const register: Register = (on) => {
         log(`model-floor: clamped ${route.model} → ${contModel} (floor=${c.config.modelFloor})`)
         route = { ...route, model: contModel }
       }
+      const escalatedFrom = up ? stored.tier : null
+      await setStatusLine($, c, statusLineText({ config: c.config, settings, model: route.model, effort: route.effort, escalatedFrom, tier: route.tier }))
       const result = yield* next({ ...e, model: route.model, effort: route.effort })
       log(`served: step ${e.index} requested=${route.model} served=${result.usage?.model ?? 'unknown'}`)
+      await setStatusLine($, c, statusLineText({ config: c.config, settings, model: route.model, effort: route.effort, escalatedFrom, tier: route.tier, actualModel: result.usage?.model ?? null }))
       await recordStep($, e, route.model, result).catch(() => {})
       return result
     }
@@ -554,8 +574,10 @@ export const register: Register = (on) => {
         let _prev = ''; try { _prev = await $.fs.read(_path) } catch {}
         await $.fs.write(_path, _prev + formatTelemetryLine(_rec) + '\n').catch(() => {})
       }
+      await setStatusLine($, c, statusLineText({ config: c.config, settings, model: route.model, effort: route.effort }))
       const result = yield* next({ ...e, model: route.model, effort: route.effort })
       log(`served: step 0 requested=${route.model} served=${result.usage?.model ?? 'unknown'} [preflight fast_path]`)
+      await setStatusLine($, c, statusLineText({ config: c.config, settings, model: route.model, effort: route.effort, actualModel: result.usage?.model ?? null }))
       await recordStep($, e, route.model, result).catch(() => {})
       return result
     }
@@ -715,8 +737,10 @@ export const register: Register = (on) => {
         : assistAsk
           ? recordJevComparison($, { turnId: e.turnId, builtinTier: route.tier, ...assistAsk }).catch(() => {})
           : null
+    await setStatusLine($, c, statusLineText({ config: c.config, settings, model: route.model, effort: route.effort }))
     const result = yield* next({ ...e, model: route.model, effort: route.effort })
     log(`served: step 0 requested=${route.model} served=${result.usage?.model ?? 'unknown'}`)
+    await setStatusLine($, c, statusLineText({ config: c.config, settings, model: route.model, effort: route.effort, actualModel: result.usage?.model ?? null }))
     await recordStep($, e, route.model, result).catch(() => {})
     if (jevPromise) await jevPromise
     return result

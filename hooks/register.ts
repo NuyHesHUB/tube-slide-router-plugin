@@ -198,10 +198,10 @@ async function* classifierFailureFallback(
     let _prev = ''; try { _prev = await $.fs.read(_path) } catch {}
     await $.fs.write(_path, _prev + formatTelemetryLine(_rec) + '\n').catch(() => {})
   }
-  await setStatusLine($, c, statusLineText({ config: c.config, settings, model: route.model, effort: route.effort }))
+  await setStatusLine($, c, statusLineText({ config: c.config, settings, model: route.model, effort: route.effort, tier: route.tier }))
   const result = yield* next({ ...e, model: route.model, effort: route.effort })
   log(`served: step 0 requested=${route.model} served=${result.usage?.model ?? 'unknown'}`)
-  await setStatusLine($, c, statusLineText({ config: c.config, settings, model: route.model, effort: route.effort, actualModel: result.usage?.model ?? null }))
+  await setStatusLine($, c, statusLineText({ config: c.config, settings, model: route.model, effort: route.effort, tier: route.tier, actualModel: result.usage?.model ?? null }))
   await recordStep($, e, route.model, result).catch(() => {})
   return result
 }
@@ -586,10 +586,10 @@ export const register: Register = (on, options) => {
         let _prev = ''; try { _prev = await $.fs.read(_path) } catch {}
         await $.fs.write(_path, _prev + formatTelemetryLine(_rec) + '\n').catch(() => {})
       }
-      await setStatusLine($, c, statusLineText({ config: c.config, settings, model: route.model, effort: route.effort }))
+      await setStatusLine($, c, statusLineText({ config: c.config, settings, model: route.model, effort: route.effort, tier: route.tier }))
       const result = yield* next({ ...e, model: route.model, effort: route.effort })
       log(`served: step 0 requested=${route.model} served=${result.usage?.model ?? 'unknown'} [preflight fast_path]`)
-      await setStatusLine($, c, statusLineText({ config: c.config, settings, model: route.model, effort: route.effort, actualModel: result.usage?.model ?? null }))
+      await setStatusLine($, c, statusLineText({ config: c.config, settings, model: route.model, effort: route.effort, tier: route.tier, actualModel: result.usage?.model ?? null }))
       await recordStep($, e, route.model, result).catch(() => {})
       return result
     }
@@ -749,10 +749,10 @@ export const register: Register = (on, options) => {
         : assistAsk
           ? recordJevComparison($, { turnId: e.turnId, builtinTier: route.tier, ...assistAsk }).catch(() => {})
           : null
-    await setStatusLine($, c, statusLineText({ config: c.config, settings, model: route.model, effort: route.effort }))
+    await setStatusLine($, c, statusLineText({ config: c.config, settings, model: route.model, effort: route.effort, tier: route.tier }))
     const result = yield* next({ ...e, model: route.model, effort: route.effort })
     log(`served: step 0 requested=${route.model} served=${result.usage?.model ?? 'unknown'}`)
-    await setStatusLine($, c, statusLineText({ config: c.config, settings, model: route.model, effort: route.effort, actualModel: result.usage?.model ?? null }))
+    await setStatusLine($, c, statusLineText({ config: c.config, settings, model: route.model, effort: route.effort, tier: route.tier, actualModel: result.usage?.model ?? null }))
     await recordStep($, e, route.model, result).catch(() => {})
     if (jevPromise) await jevPromise
     return result

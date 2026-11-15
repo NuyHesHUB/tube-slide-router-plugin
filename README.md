@@ -134,7 +134,7 @@ claude --plugin-dir .
 | `/tsr-router export` | 팀 공유용 보정 통계를 프로젝트 파일에 내보내기 |
 | `/tsr-docs` | 주요 지침 문서가 가리키는 경로 존재 여부 검사 |
 
-매 턴마다 터미널 상태줄에 `TSR {모드} | Selected: {모델}/{effort}`가 뜨고, 실제 서빙된 모델을 확인하면 `| Actual: {모델}`이 붙습니다. `{모드}`는 `pin`(고정) > `off` > `hungry` > `auto`/`manual` 순으로 우선순위가 높은 쪽이 표시됩니다. 설정에서 `statusLine.enabled: false`로 끌 수 있습니다(라우팅 자체는 그대로 동작, 상태줄 호출만 생략).
+매 턴마다 터미널 상태줄에 `TSR {모드} | Tier: {등급} | Selected: {모델}/{effort}`가 뜨고, 실제 서빙된 모델을 확인하면 `| Actual: {모델}`이 붙습니다. `Tier`는 분류된 난이도(극소/하/중/상/최상)로, `modelFloor` 때문에 `Selected`가 올라가도("하로 분류됐는데 Selected는 sonnet") 실제 분류 결과를 바로 알 수 있게 해줍니다. 같은 턴 안에서 승급(에스컬레이션)이 일어나면 `Tier: 하→중`처럼 이전→이후로 표시되고, 분류가 아예 일어나지 않은 경로(`pin`, `off`)에서는 `Tier` 자체가 안 뜹니다. `{모드}`는 `pin`(고정) > `off` > `hungry` > `auto`/`manual` 순으로 우선순위가 높은 쪽이 표시됩니다. 설정에서 `statusLine.enabled: false`로 끌 수 있습니다(라우팅 자체는 그대로 동작, 상태줄 호출만 생략).
 
 ## 설정
 

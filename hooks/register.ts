@@ -372,13 +372,86 @@ const draftFrom = (config: typeof DEFAULTS): PaneDraft => ({
 
 const setPane = ($: any, view: string, draft: PaneDraft) => $.state.set({ plugin: 'tube-slide-router', key: 'pane' }, { view, draft })
 
+// Separate from the removed pane-auto-open bug (session.start comment above): this flag is set
+// only once the person actually answers the first $.ui.ask question (or explicitly skips via
+// "나중에"), never just because the question was drawn. modelFloor/routeProfile are flat enums
+// plugin.json's userConfig could express too, but userConfig fields only apply at install/
+// /config time — this covers "I'm already using the plugin, let me pick these now" without
+// sending the person to a settings menu.
+const QUICK_SETUP_KEY = 'tsr-quick-setup-done'
+
+// Merges into the existing profile file rather than rewriting it (unlike saveProfile, which is
+// the Pane's "설정 완료" full-form save) — this only ever touches modelFloor/routeProfile, so a
+// person who already hand-edited routes/riskAreas in that file keeps them.
+const saveQuickSetup = async ($: any, patch: Partial<Pick<typeof DEFAULTS, 'modelFloor' | 'routeProfile'>>) => {
+  const c = await ensureCtx($)
+  const existing = await readJsonFile($, c.paths.profile)
+  const base: Record<string, unknown> = isPlainObject(existing.value) ? existing.value : { version: 1 }
+  const file = { ...base, ...patch }
+  const { errors } = mergeConfig(DEFAULTS, file)
+  if (errors.length) return
+  await $.fs.write(c.paths.profile, JSON.stringify(file, null, 2) + '\n')
+  ctx = await loadCtx($)
+}
+
+// AskUserQuestion-style quick setup (2026-11-16): a short $.ui.ask sequence, not a Pane. Covers
+// only what userConfig can't (modelFloor, routeProfile) — see QUICK_SETUP_KEY comment. Every
+// $.ui.ask is wrapped: it rejects with no one to answer (headless/-p) or on dismiss, and either
+// case should leave the person on defaults rather than fail session.start.
+const runQuickSetup = async ($: any) => {
+  // 2026-11-16, 2nd try: $.ui.log draws each call as its own "● tube-slide-router: ..." row —
+  // even one line per call (the 1st fix, for the \n-garbling bug) still scatters the logo across
+  // several separate log lines in the transcript. Dropped entirely; the logo+tagline is now
+  // prepended to the first question's own text instead, so it is drawn once, inside that single
+  // AskUserQuestion card, rather than as log output above it.
+  let start: string
+  try {
+    start = await $.ui.ask(`${LOGO}\n\n${TAGLINE}\n\n처음 오셨네요 — Tube Slide Router, 어떻게 시작할까요?`, ['자동 (추천)', '세부 설정', '나중에'])
+  } catch {
+    return // no one to ask (headless) or dismissed: stay on defaults, ask again next time
+  }
+  await $.store.set(QUICK_SETUP_KEY, true).catch(() => {})
+  if (start === '나중에') {
+    $.ui.toast('기본 등급표로 시작합니다. 나중에 /tsr-router quicksetup, 전체 명령은 /tsr-router help.')
+    return
+  }
+  if (start !== '세부 설정') {
+    // '자동 (추천)': defaults are already in effect, nothing to write — still worth a one-line
+    // pointer to the help command, since this is the only place it's ever naturally mentioned.
+    $.ui.toast('기본 등급표로 시작합니다. 전체 명령은 /tsr-router help.')
+    return
+  }
+  // 기본값은 'haiku'다 — 'sonnet'이 아니다. 2026-11-15 커밋 21ba515(R-023 실측 근거, 20건
+  // 수용률 100%·비용 93.6% 절감, 사용자 직접 승인)로 DEFAULTS.modelFloor 자체가 바뀐 뒤다.
+  // 여기 폴백이 이 사실과 어긋나면 안 된다(2026-11-16, tube-slide-router-c6 리뷰 지적).
+  let modelFloor: typeof DEFAULTS.modelFloor = 'haiku'
+  try {
+    const floor = await $.ui.ask('최하위 모델 기준(floor)을 뭘로 할까요? 라우팅표가 더 낮은 모델을 골라도 이 아래로는 안 내려갑니다.', [
+      'Haiku (기본값, 전체 범위 — R-023 실측 근거: 20건 수용률 100%, 비용 93.6% 절감)',
+      'Sonnet (더 보수적, 저난이도 과제 할인 포기, Haiku 다운그레이드 차단)',
+    ])
+    modelFloor = floor.startsWith('Sonnet') ? 'sonnet' : 'haiku'
+  } catch {
+    // leave at haiku (DEFAULTS와 동일)
+  }
+  let routeProfile: typeof DEFAULTS.routeProfile = 'default'
+  try {
+    const preset = await $.ui.ask('등급표 프리셋을 고르세요.', ['기본 (default)', 'ABL-EB (최신 실험, 추천)'])
+    routeProfile = preset.startsWith('ABL-EB') ? 'abl-eb' : 'default'
+  } catch {
+    // leave at default
+  }
+  await saveQuickSetup($, { modelFloor, routeProfile })
+  $.ui.toast(`설정을 저장했습니다 — floor=${modelFloor}, 프리셋=${routeProfile}. 세부 설정은 /tsr-router setup, 전체 명령은 /tsr-router help.`)
+}
+
 export const register: Register = (on, options) => {
   pluginOptions = options ?? {}
   on('session.start', async ($, e, next) => {
     await $.command.register({
       name: 'tsr-router',
-      description: 'Tube Slide Router 패널 열기, 또는 status / reload / on / off / hungry / normal / setup / export / risk',
-      argumentHint: '[status|reload|on|off|hungry|normal|setup|export|risk|help]',
+      description: 'Tube Slide Router 패널 열기, 또는 status / reload / on / off / hungry / normal / setup / quicksetup / export / risk',
+      argumentHint: '[status|reload|on|off|hungry|normal|setup|quicksetup|export|risk|help]',
       immediate: true,
     })
     await $.command.register({
@@ -396,6 +469,15 @@ export const register: Register = (on, options) => {
     // set just because the pane rendered, not because the user did anything with it). The
     // welcome/tiers/budget/done views still exist and are still reachable by hand
     // (/tsr-router setup) for routes/riskAreas, which userConfig can't express (nested shapes).
+    //
+    // 2026-11-16: modelFloor/routeProfile are flat enums userConfig *could* express, but only
+    // at install/config time — so a short $.ui.ask sequence (not a Pane) offers them once,
+    // first run only, same gating style the old pane wizard used (interactive, config still at
+    // defaults) plus its own flag (QUICK_SETUP_KEY) since skipping writes no file.
+    if (e.isInteractive && ctx.configSource === '기본값' && !(await $.store.get(QUICK_SETUP_KEY).catch(() => true))) {
+      await runQuickSetup($).catch(() => {})
+      ctx = await loadCtx($)
+    }
     return next(e)
   })
 
@@ -834,6 +916,10 @@ const registerCommandsAndPane = (on: Parameters<Register>[0]) => {
     const s = settings ?? {}
     const c = await ensureCtx($)
     if (arg === 'help') return { text: HELP }
+    if (arg === 'quicksetup') {
+      await runQuickSetup($)
+      return { text: '' }
+    }
     if (arg === 'reload') {
       ctx = await loadCtx($)
       return { text: `설정을 다시 읽었습니다. 현재 설정: ${ctx.configSource}` }

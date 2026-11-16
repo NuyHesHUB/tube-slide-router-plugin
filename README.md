@@ -147,7 +147,7 @@ claude --plugin-dir .
 | `/tsr-router compare <프롬프트>` | 같은 작업을 고정 모델(기본 Sonnet/high)과 TSR 라우팅 둘 다로 실행해 비용·소요시간 비교 (1단계 구현, 아래 "비교 모드" 절 참고) |
 | `/tsr-docs` | 주요 지침 문서가 가리키는 경로 존재 여부 검사 |
 
-매 턴마다 터미널 상태줄에 `TSR {모드} | Tier: {등급} | Routed: {모델}/{effort}`가 뜨고, 실제 서빙된 모델을 확인하면 `| Actual: {모델}/{effort}(요청값)`이 붙습니다(2026-11-15: 라벨을 `Selected`에서 `Routed`로 바꿨습니다 — "Selected"는 사용자가 직접 고른 것처럼 읽힐 수 있는데, 실제로는 TSR이 자동으로 고른 값이기 때문입니다). `Tier`는 분류된 난이도(극소/하/중/상/최상)로, `modelFloor` 때문에 `Routed`가 올라가도("하로 분류됐는데 Routed는 sonnet") 실제 분류 결과를 바로 알 수 있게 해줍니다. 같은 턴 안에서 승급(에스컬레이션)이 일어나면 `Tier: 하→중`처럼 이전→이후로 표시되고, 분류가 아예 일어나지 않은 경로(`pin`, `off`)에서는 `Tier` 자체가 안 뜹니다. `Actual`의 모델명은 `result.usage.model`로 실제 확인된 값이지만, effort는 — `claude-code`의 `usage` 타입(`ModelUsage`/`TurnUsage`)에 effort 필드가 아예 없어(2026-11-15 재확인) — 여전히 독립적으로 검증할 방법이 없습니다. 그래서 `Actual`의 effort는 항상 "요청했던 값"이고, 확인된 값이 아니라는 걸 `(요청값)` 표시로 구분합니다(예: `Actual: claude-sonnet-5-5/high(요청값)`) — 거짓 확신을 주지 않기 위해서입니다. `{모드}`는 `pin`(고정) > `off` > `hungry` > `auto`/`manual` 순으로 우선순위가 높은 쪽이 표시됩니다. 설정에서 `statusLine.enabled: false`로 끌 수 있습니다(라우팅 자체는 그대로 동작, 상태줄 호출만 생략).
+매 턴마다 터미널 상태줄에 `TSR {모드} · 활성 | Tier: {등급} | Routed: {모델}/{effort}`가 뜨고, 실제 서빙된 모델을 확인하면 `| 적용: {모델}`이 붙습니다(2026-11-16: "상태: model 확인됨 · effort 확인불가"/"상태: 대기" 같은 문구와 `Actual`의 `(요청값)` 표시를 없애고 `적용`으로 단순화했습니다 — 사용자 피드백: "라우터가 active 된 것만 보여주면 된다"). 2026-11-15에는 라벨을 `Selected`에서 `Routed`로 바꿨습니다 — "Selected"는 사용자가 직접 고른 것처럼 읽힐 수 있는데, 실제로는 TSR이 자동으로 고른 값이기 때문입니다. `Tier`는 분류된 난이도(극소/하/중/상/최상)로, `modelFloor` 때문에 `Routed`가 올라가도("하로 분류됐는데 Routed는 sonnet") 실제 분류 결과를 바로 알 수 있게 해줍니다. 같은 턴 안에서 승급(에스컬레이션)이 일어나면 `Tier: 하→중`처럼 이전→이후로 표시되고, 분류가 아예 일어나지 않은 경로(`pin`, `off`)에서는 `Tier` 자체가 안 뜹니다. `적용`의 모델명은 `result.usage.model`로 실제 확인된 값입니다 — effort는 `claude-code`의 `usage` 타입(`ModelUsage`/`TurnUsage`)에 필드 자체가 없어 여전히 독립적으로 검증할 방법이 없으므로(2026-11-15 재확인), 거짓 확신을 주지 않기 위해 `적용`에는 아예 표시하지 않습니다. `{모드}`는 `pin`(고정) > `off` > `hungry` > `auto`/`manual` 순으로 우선순위가 높은 쪽이 표시됩니다. 설정에서 `statusLine.enabled: false`로 끌 수 있습니다(라우팅 자체는 그대로 동작, 상태줄 호출만 생략).
 
 ### 비교 모드 (`/tsr-router compare`, 1단계 구현 — 설계: `benchmark/compare-mode-DESIGN.md`)
 
@@ -212,8 +212,8 @@ TSR은 **세션의 기본 모델 설정(`/model`로 바꾸는 값, 터미널 하
 모델 자신의 답변도 실제로 그 턴에 어떤 모델이 응답했는지와 무관하게 신뢰할 수 없습니다(모델이
 자기 자신의 정체를 정확히 아는 것도 아니고, 시스템 프롬프트에 적힌 값을 그대로 말할 수도
 있습니다). **실제로 어떤 모델이 그 턴을 처리했는지 확인하려면**:
-- 터미널 상태줄의 `Actual: {모델}/{effort}(요청값)` — `result.usage.model`로 실제 확인된 값
-  (effort는 여전히 독립 검증 불가라 "요청값"으로 표시됩니다, 위 "명령" 절 참고).
+- 터미널 상태줄의 `적용: {모델}` — `result.usage.model`로 실제 확인된 값
+  (effort는 여전히 독립 검증 불가라 표시하지 않습니다, 위 "명령" 절 참고).
 - `.claude/tsr-telemetry.jsonl`의 `actualModel` 필드.
 - Claude Code 자체의 세션 transcript(실제 요청/응답 로그).
 

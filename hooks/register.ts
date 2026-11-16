@@ -450,8 +450,8 @@ export const register: Register = (on, options) => {
   on('session.start', async ($, e, next) => {
     await $.command.register({
       name: 'tsr-router',
-      description: 'Tube Slide Router 패널 열기, 또는 status / reload / on / off / hungry / normal / setup / quicksetup / export / risk',
-      argumentHint: '[status|reload|on|off|hungry|normal|setup|quicksetup|export|risk|help]',
+      description: 'Tube Slide Router 패널 열기, 또는 status / reload / on / off / setup / quicksetup / export / risk',
+      argumentHint: '[status|reload|on|off|setup|quicksetup|export|risk|help]',
       immediate: true,
     })
     await $.command.register({
@@ -928,10 +928,9 @@ const registerCommandsAndPane = (on: Parameters<Register>[0]) => {
       await $.state.set(settingsRef, { ...s, off: arg === 'off' })
       return { text: arg === 'off' ? '이 세션의 라우팅을 껐습니다. 원래 모델로 요청이 나갑니다.' : '이 세션의 라우팅을 켰습니다.' }
     }
-    if (arg === 'hungry' || arg === 'normal') {
-      await $.state.set(settingsRef, { ...s, hungry: arg === 'hungry' })
-      return { text: arg === 'hungry' ? 'hungry 모드(가칭): 이 세션은 예산과 상관없이 모든 턴을 최상 등급으로 보냅니다.' : 'hungry 모드를 해제했습니다.' }
-    }
+    // hungry(예정): 한도가 바닥나도 가벼운 설정으로 남은 사용량을 늘려 개발을 이어가는 모드 —
+    // 2026-11-16 활성 명령(hungry/normal)에서 제거, 구현 전까지는 settings.hungry를 세팅할
+    // 방법이 없음(내부 라우팅 로직은 lib/policy.mjs 등에 남아 있음).
     if (arg === 'pin') {
       const parts = e.args.trim().split(/\s+/)
       const model = parts[1]
@@ -1129,7 +1128,6 @@ const registerCommandsAndPane = (on: Parameters<Register>[0]) => {
               h(Select, { key: 'save', label: '절전 임계치 (이 선부터 하 이하)', value: String(b.savePct), options: options([80, 90, 95], (v) => `${v}%`), onSelect: (v: string) => setB({ savePct: Number(v) }) }),
             )
           : null,
-        h(Text, { dimColor: true }, '예산과 상관없이 최상위 등급을 쓰고 싶을 땐 /tsr-router hungry (가칭)'),
         row(
           h(Button, { key: 'save', variant: 'primary', onPress: () => void saveProfile($, draft).then(() => go('done')).catch(() => go('error')) }, '저장하고 시작'),
           h(Button, { key: 'skip', onPress: () => void saveProfile($, { ...draft, budget: { ...b, enabled: false } }).then(() => go('done')).catch(() => go('error')) }, '예산 가드 없이 저장'),

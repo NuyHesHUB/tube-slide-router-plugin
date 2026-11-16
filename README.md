@@ -139,7 +139,6 @@ claude --plugin-dir .
 | `/tsr-router` | 상태와 설정 패널 열기 |
 | `/tsr-router status` | 상태를 텍스트로 보기 |
 | `/tsr-router off` / `on` | 현재 세션의 라우팅 끄기 / 켜기 |
-| `/tsr-router hungry` / `normal` | 이번 세션을 상 등급 고정 / 해제 |
 | `/tsr-router pin <모델> <effort>` | 이번 세션만 즉석으로 모델/effort 고정 (설정 파일은 안 건드림, `off`보다 우선) |
 | `/tsr-router unpin` | 고정 해제, 원래(auto/manual) 라우팅으로 복귀 |
 | `/tsr-router setup` | 등급표·예산 설정 패널 열기 (세션 시작 시 자동으로 뜨지 않음 — 간단한 값은 `/config`, `routes`처럼 중첩된 값은 이 패널이나 설정 파일) |
@@ -147,7 +146,12 @@ claude --plugin-dir .
 | `/tsr-router compare <프롬프트>` | 같은 작업을 고정 모델(기본 Sonnet/high)과 TSR 라우팅 둘 다로 실행해 비용·소요시간 비교 (1단계 구현, 아래 "비교 모드" 절 참고) |
 | `/tsr-docs` | 주요 지침 문서가 가리키는 경로 존재 여부 검사 |
 
-매 턴마다 터미널 상태줄에 `TSR {모드} · 활성 | Tier: {등급} | Routed: {모델}/{effort}`가 뜨고, 실제 서빙된 모델을 확인하면 `| 적용: {모델}`이 붙습니다(2026-11-16: "상태: model 확인됨 · effort 확인불가"/"상태: 대기" 같은 문구와 `Actual`의 `(요청값)` 표시를 없애고 `적용`으로 단순화했습니다 — 사용자 피드백: "라우터가 active 된 것만 보여주면 된다"). 2026-11-15에는 라벨을 `Selected`에서 `Routed`로 바꿨습니다 — "Selected"는 사용자가 직접 고른 것처럼 읽힐 수 있는데, 실제로는 TSR이 자동으로 고른 값이기 때문입니다. `Tier`는 분류된 난이도(극소/하/중/상/최상)로, `modelFloor` 때문에 `Routed`가 올라가도("하로 분류됐는데 Routed는 sonnet") 실제 분류 결과를 바로 알 수 있게 해줍니다. 같은 턴 안에서 승급(에스컬레이션)이 일어나면 `Tier: 하→중`처럼 이전→이후로 표시되고, 분류가 아예 일어나지 않은 경로(`pin`, `off`)에서는 `Tier` 자체가 안 뜹니다. `적용`의 모델명은 `result.usage.model`로 실제 확인된 값입니다 — effort는 `claude-code`의 `usage` 타입(`ModelUsage`/`TurnUsage`)에 필드 자체가 없어 여전히 독립적으로 검증할 방법이 없으므로(2026-11-15 재확인), 거짓 확신을 주지 않기 위해 `적용`에는 아예 표시하지 않습니다. `{모드}`는 `pin`(고정) > `off` > `hungry` > `auto`/`manual` 순으로 우선순위가 높은 쪽이 표시됩니다. 설정에서 `statusLine.enabled: false`로 끌 수 있습니다(라우팅 자체는 그대로 동작, 상태줄 호출만 생략).
+매 턴마다 터미널 상태줄에 `TSR {모드} · 활성 | Tier: {등급} | Routed: {모델}/{effort}`가 뜨고, 실제 서빙된 모델을 확인하면 `| 적용: {모델}`이 붙습니다(2026-11-16: "상태: model 확인됨 · effort 확인불가"/"상태: 대기" 같은 문구와 `Actual`의 `(요청값)` 표시를 없애고 `적용`으로 단순화했습니다 — 사용자 피드백: "라우터가 active 된 것만 보여주면 된다"). 2026-11-15에는 라벨을 `Selected`에서 `Routed`로 바꿨습니다 — "Selected"는 사용자가 직접 고른 것처럼 읽힐 수 있는데, 실제로는 TSR이 자동으로 고른 값이기 때문입니다. `Tier`는 분류된 난이도(극소/하/중/상/최상)로, `modelFloor` 때문에 `Routed`가 올라가도("하로 분류됐는데 Routed는 sonnet") 실제 분류 결과를 바로 알 수 있게 해줍니다. 같은 턴 안에서 승급(에스컬레이션)이 일어나면 `Tier: 하→중`처럼 이전→이후로 표시되고, 분류가 아예 일어나지 않은 경로(`pin`, `off`)에서는 `Tier` 자체가 안 뜹니다. `적용`의 모델명은 `result.usage.model`로 실제 확인된 값입니다 — effort는 `claude-code`의 `usage` 타입(`ModelUsage`/`TurnUsage`)에 필드 자체가 없어 여전히 독립적으로 검증할 방법이 없으므로(2026-11-15 재확인), 거짓 확신을 주지 않기 위해 `적용`에는 아예 표시하지 않습니다. `{모드}`는 `pin`(고정) > `off` > `auto`/`manual` 순으로 우선순위가 높은 쪽이 표시됩니다. 설정에서 `statusLine.enabled: false`로 끌 수 있습니다(라우팅 자체는 그대로 동작, 상태줄 호출만 생략).
+
+> **hungry(예정)**: 한도가 바닥나도 가벼운 설정으로 남은 사용량을 늘려 개발을 이어가는 모드를
+> 구상 중입니다. 의도했던 동작이 아직 구현되지 않아 2026-11-16 활성 명령(`/tsr-router hungry` /
+> `normal`)과 패널 언급을 제거했습니다 — 내부 라우팅 로직(`mod/lib/policy.mjs` 등)은 남아
+> 있지만 지금은 어떤 명령으로도 켤 수 없습니다.
 
 ### 비교 모드 (`/tsr-router compare`, 1단계 구현 — 설계: `benchmark/compare-mode-DESIGN.md`)
 

@@ -91,17 +91,17 @@ claude --plugin-dir .
 매 턴 터미널 상태줄에 이렇게 뜹니다.
 
 ```
-TSR AUTO | Tier: 하 | Routed: haiku/medium | Actual: claude-haiku-5-5/medium(요청값)
+TSR AUTO · 활성 | Tier: 하 | Routed: haiku/medium | 적용: claude-haiku-5-5
 ```
 
-- **`TSR {모드}`** — 지금 동작 모드. 우선순위 `pin` > `off` > `hungry` > `auto`/`manual` 순으로 높은 쪽이 표시됩니다.
+- **`TSR {모드} · 활성`** — 지금 동작 모드와 활성 표시. 우선순위 `pin` > `off` > `hungry` > `auto`/`manual` 순으로 높은 쪽이 표시됩니다.
 - **`Tier: {등급}`** — 이번 요청이 분류된 난이도(극소/하/중/상/최상). 같은 턴 안에서 승급되면 `Tier: 하→중`처럼 보입니다. `pin`·`off`처럼 분류를 안 하는 경로에서는 안 뜹니다.
 - **`Routed: {모델}/{effort}`** — TSR이 실제로 그 턴에 요청한 모델·effort. (예전 라벨 `Selected`에서 바뀜 — 사용자가 고른 게 아니라 TSR이 자동으로 고른 값이라서.)
-- **`Actual: {모델}/{effort}(요청값)`** — 실제로 응답한 모델(`result.usage.model`로 확인된 값). effort는 Claude Code가 확인값을 주지 않아 "요청값"임을 `(요청값)`으로 표시합니다(거짓 확신을 주지 않기 위해).
+- **`적용: {모델}`** — 실제로 응답한 모델(`result.usage.model`로 확인된 값). **모델 이름만** 보여줍니다 — effort는 Claude Code 응답(`usage`)에 필드 자체가 없어 독립 확인이 불가능하므로, 거짓으로 "확인됨"을 암시하지 않기 위해 상태줄에는 표시하지 않습니다. (응답을 아직 못 받은 턴에는 `적용:` 부분이 안 붙습니다.)
 
 상태줄이 거슬리면 `/config`의 `statusLineEnabled`를 끄거나 설정 파일에 `"statusLine": { "enabled": false }`로 끌 수 있습니다(라우팅 자체는 그대로 동작).
 
-> **참고**: 터미널 하단 기본 상태바의 모델 이름이나, 모델에게 "너 무슨 모델이야?"라고 물은 답은 TSR 개입을 반영하지 않을 수 있습니다. TSR은 세션 기본 모델 설정은 건드리지 않고 **그 턴의 API 호출만 바꿔치기**하기 때문입니다. 실제 처리 모델은 위 `Actual` 값이나 `.claude/tsr-telemetry.jsonl`의 `actualModel`로 확인하세요.
+> **참고**: 터미널 하단 기본 상태바의 모델 이름이나, 모델에게 "너 무슨 모델이야?"라고 물은 답은 TSR 개입을 반영하지 않을 수 있습니다. TSR은 세션 기본 모델 설정은 건드리지 않고 **그 턴의 API 호출만 바꿔치기**하기 때문입니다. 실제 처리 모델은 위 `적용:` 값이나 `.claude/tsr-telemetry.jsonl`의 `actualModel`로 확인하세요.
 
 ---
 

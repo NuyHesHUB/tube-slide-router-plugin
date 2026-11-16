@@ -68,7 +68,6 @@ claude --plugin-dir .
 | `/tsr-router` | 상태와 설정을 보여주는 패널 열기 |
 | `/tsr-router status` | 상태를 텍스트로 보기 |
 | `/tsr-router off` / `on` | 이번 세션 라우팅 끄기 / 켜기 |
-| `/tsr-router hungry` / `normal` | 이번 세션을 `상` 등급으로 고정 / 해제 |
 | `/tsr-router pin <모델> <effort>` | 이번 세션만 즉석으로 모델·effort 고정 (설정 파일은 안 건드림, `off`보다 우선) |
 | `/tsr-router unpin` | 고정 해제, 원래(auto/manual) 라우팅으로 복귀 |
 | `/tsr-router quicksetup` | 질문에 답하며 처음 설정하기 (시작방식·modelFloor·등급표) |
@@ -83,6 +82,8 @@ claude --plugin-dir .
 /tsr-router unpin                # 다시 자동 라우팅으로
 /tsr-router off                  # 잠깐 라우팅 끄기(세션 기본 모델 그대로)
 ```
+
+> 🔜 **예정: hungry 모드** — 한도가 바닥나도 가벼운 설정으로 남은 사용량을 늘려 개발을 이어가는 모드입니다. (아직 구현 전)
 
 ---
 
@@ -104,7 +105,7 @@ claude --plugin-dir .
 TSR AUTO · 활성 | Tier: 하 | Routed: haiku/medium | 적용: claude-haiku-5-5
 ```
 
-- **`TSR {모드} · 활성`** — 지금 동작 모드와 활성 표시. 우선순위 `pin` > `off` > `hungry` > `auto`/`manual` 순으로 높은 쪽이 표시됩니다.
+- **`TSR {모드} · 활성`** — 지금 동작 모드와 활성 표시. 우선순위 `pin` > `off` > `auto`/`manual` 순으로 높은 쪽이 표시됩니다.
 - **`Tier: {등급}`** — 이번 요청이 분류된 난이도(극소/하/중/상/최상). 같은 턴 안에서 승급되면 `Tier: 하→중`처럼 보입니다. `pin`·`off`처럼 분류를 안 하는 경로에서는 안 뜹니다.
 - **`Routed: {모델}/{effort}`** — TSR이 실제로 그 턴에 요청한 모델·effort. (예전 라벨 `Selected`에서 바뀜 — 사용자가 고른 게 아니라 TSR이 자동으로 고른 값이라서.)
 - **`적용: {모델}`** — 실제로 응답한 모델(`result.usage.model`로 확인된 값). **모델 이름만** 보여줍니다 — effort는 Claude Code 응답(`usage`)에 필드 자체가 없어 독립 확인이 불가능하므로, 거짓으로 "확인됨"을 암시하지 않기 위해 상태줄에는 표시하지 않습니다. (응답을 아직 못 받은 턴에는 `적용:` 부분이 안 붙습니다.)

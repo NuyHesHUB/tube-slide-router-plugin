@@ -86,6 +86,16 @@ claude --plugin-dir .
 
 ---
 
+## 끄기 · 삭제
+
+끄면 Claude Code는 **원래 기본 모델·설정 그대로** 돌아갑니다. 설정 파일은 보존됩니다.
+
+- **잠깐 끄기 (이 세션만)** — `/tsr-router off` 로 라우팅을 끕니다. 세션 기본 모델 그대로 동작하고, `/tsr-router on` 으로 다시 켭니다. 설정 파일은 그대로 보존됩니다.
+- **비활성화 (설치는 유지)** — 셸에서 `claude plugin disable tube-slide-router` (복구: `claude plugin enable tube-slide-router`). 세션에서는 `/plugin` → Installed 탭에서도 가능합니다.
+- **완전 삭제(제거)** — 셸에서 `claude plugin uninstall tube-slide-router`. `/plugin` → Installed 에서도 가능합니다. 설정 파일 `~/.claude/tube-slide-router.json` 은 남으니, 원하면 직접 지우면 됩니다.
+
+---
+
 ## 4. 상태줄 읽는 법
 
 매 턴 터미널 상태줄에 이렇게 뜹니다.

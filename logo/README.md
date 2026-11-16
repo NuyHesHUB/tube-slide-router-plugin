@@ -14,7 +14,8 @@ make
 |---|---|
 | `tube_slide_red.c` | 빨간색(`#e61121`) 애니메이션 버전 |
 | `tube_slide_combo.c` | 정적 콤보 — 3D 슬라이드 + 워드마크 나란히 배치 |
-| `tsr-wordmark.txt` | 콤보 렌더러가 쓰는 워드마크 텍스트 |
+| `tube_slide_portable.c` | **단일 파일**, 외부 의존성 없음(워드마크 내장, `tsr-wordmark.txt` 불필요) — 기본 빨간색+세로(stack), `--combo`로 가로, `--blue`로 파란색 |
+| `tsr-wordmark.txt` | 콤보 렌더러가 쓰는 워드마크 텍스트(portable은 불필요) |
 
 ## 사용
 
@@ -27,6 +28,11 @@ make
 
 # 콤보(3D 슬라이드 + 워드마크)
 ./tube-slide-combo --red --wordmark tsr-wordmark.txt
+
+# portable(파일 하나만 복사해서 바로 빌드·실행 — 다른 세션/머신용)
+cc -O2 -std=c11 -o tsr tube_slide_portable.c -lm && ./tsr
+./tsr --combo   # 가로 배치
+./tsr --blue    # 파란색
 ```
 
 ## 옵션 (tube-slide-red)
@@ -52,4 +58,17 @@ make
 | `--slide-height INT` | 34 | 3D 슬라이드 렌더링 높이 |
 | `--gap INT` | 4 | 슬라이드와 워드마크 사이 간격 |
 | `--angle FLOAT` | 0.5 | 회전 각도 |
+| `--no-color` | off | 흑백 출력 |
+
+## 옵션 (tube-slide-portable)
+
+| 옵션 | 기본값 | 설명 |
+|---|---|---|
+| `--combo` | off | 가로(side-by-side) 배치 — 기본은 세로(stack) |
+| `--blue` | off | 파란색 — 기본은 빨간색 |
+| `--angle FLOAT` | 0.5 | 회전 각도 |
+| `--slide-width INT` | 60 | 3D 슬라이드 렌더링 너비 |
+| `--slide-height INT` | 34 | 3D 슬라이드 렌더링 높이 |
+| `--vgap INT` | — | 세로 배치일 때 슬라이드-워드마크 간격 |
+| `--gap INT` | — | 가로 배치일 때 슬라이드-워드마크 간격 |
 | `--no-color` | off | 흑백 출력 |

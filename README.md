@@ -197,8 +197,8 @@ claude --plugin-dir .
   },
   "budget": { "enabled": false, "dailyUsd": 20, "warnPct": 70, "savePct": 90 },
   "calibration": { "enabled": false },
-  "escalation": { "cascade": false },
-  "observedChecks": { "enabled": true },
+  "escalation": { "cascade": true },
+  "observedChecks": { "enabled": false },
   "fable": { "enabled": false },
   "statusLine": { "enabled": true }
 }
@@ -210,8 +210,8 @@ claude --plugin-dir .
 
 | 키 | 기본값 | 설명 |
 | --- | --- | --- |
-| `escalation.cascade` | `false` | 켜면 반복 실패 시 한 등급씩 올리는 대신 FrugalGPT식으로 남은 상위 모델을 비례 승급합니다. 끄면 기존의 한 단계 승급. |
-| `observedChecks.enabled` | `true` | 턴 종료 후 테스트처럼 보이는 명령의 **실제** 통과/실패를 로컬 ledger에 기록해 다음 턴 승급 판단에 씁니다(관측된 실제 결과만 사용). |
+| `escalation.cascade` | `true` | **기본 켜짐.** 반복 실패 시 한 등급씩이 아니라 FrugalGPT식으로, 추가 `failsInRow`회 실패마다 한 등급씩 더(최상까지) 비례 승급합니다. `false`로 끄면 기존의 한 번에 한 단계 승급. |
+| `observedChecks.enabled` | `false` | **기본 꺼짐** — 켜면 턴 종료 후 외부 체크(CI·pre-commit·수용/테스트 러너)의 **실제** 통과/실패를 로컬 ledger에 기록해 다음 턴 승급 판단에 씁니다(관측된 실제 결과만 사용). 팀/벤치마크가 opt-in하기 전까지 대화형 라우팅은 그대로입니다. |
 | `fable.enabled` | `false` | **off-by-default 레버.** 켜면 재앙 규모 위험영역(비밀정보·키, DB 마이그레이션)에 한해 상한이 opus→fable로 올라갑니다. 일반 `최상`·승급 캐스케이드는 켜도 opus 유지. fable은 **미측정** 모델이고 실가격 미상이라 비용은 `null`(미상)로 기록됩니다(0으로 지어내지 않음). `modelFloor: "fable"`도 이 키가 켜져 있어야만 적용되며, 꺼져 있으면 opus로 대체됩니다. |
 
 ## 알아두면 좋은 것

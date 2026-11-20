@@ -164,7 +164,11 @@ declare module 'claude-code' {
       turnRoutes: StateFamily<TurnRoute>
       turnTools: StateFamily<TurnTally>
       currentTurnId: string
-      lastRoute: { tier: Tier; model: string; effort: Effort }
+      // `escalatedFrom`/`failStreak` added so escalation memory survives a turn: the preflight's
+      // `recentlyEscalated` check can see the prior turn moved up, and an unresolved fail streak
+      // carries into the next turn (a passing test still resets it). Optional — an older stored
+      // value without them reads back as a plain route and behaves exactly as before.
+      lastRoute: { tier: Tier; model: string; effort: Effort; escalatedFrom?: Tier | null; failStreak?: number }
       settings: { off?: boolean; hungry?: boolean; pin?: { model: string; effort: Effort } }
       classifierHealth: { failures: number; pausedUntil: number }
       jevHealth: { failures: number; pausedUntil: number }

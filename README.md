@@ -110,9 +110,11 @@ claude --plugin-dir .
 | --- | --- | --- |
 | 극소 | Haiku | medium |
 | 하 | Haiku | medium |
-| 중 | Sonnet | high |
+| 중 | Sonnet | medium |
 | 상 | Sonnet | high |
 | 최상 | Opus | high |
+
+`중` 등급의 effort는 2026-11-20에 `high`에서 `medium`으로 낮췄습니다("싼 건 싸게, 확실할 때만 강하게"). emed1 측정(contract-v2 medium 6케이스 × {sonnet/medium, sonnet/high} × 2반복 = 24런)에서 medium·high가 **둘 다 12/12 성공**하면서 medium이 thinking 약 61%·비용 약 14%를 줄였습니다. 한계(정직): 두 effort를 **가르는 실패 케이스가 0건**이라 "측정된 손실 없이 절약"이지 모든 중 과제가 동등하다는 증명은 아닙니다. 드물게 under-think가 나면 승급 캐스케이드가 보정합니다(상세: `benchmark/real-repo-e2e/E2E-AUG1-REPORT.md` §8). 단, 분류·컨텍스트 수집이 **실패**한 불확실 경로의 안전 바닥은 이 값과 분리되어 `Sonnet/high`로 유지됩니다(불확실 = 더 사고).
 
 기본 `modelFloor`는 `haiku`입니다(2026-11-15 변경 — 전에는 `sonnet`이었습니다). 그래서 위 표의 등급표 그대로, 극소·하 등급은 실제로 Haiku까지 내려가 실행됩니다. 이전 기본값(`sonnet`)은 R-008(2026-11-13) 때 "Haiku로 내려가면 품질이 떨어질 수 있다"는 추정으로 들어간 안전장치였는데, 그 추정에 직접적인 실측 근거는 없었습니다. R-023(2026-11-15, 저난이도 과제 4종×5반복=20건) 실험에서 `modelFloor: haiku`가 수용률 저하 없이(100%) 비용을 93.6% 줄이는 결과가 나와, 사용자가 그 결과와 "표본이 20건뿐이라 반복 검증 전"이라는 한계를 함께 확인한 뒤 기본값을 바꾸기로 결정했습니다(상세: `benchmark/rounds/R-023/R-023-report.md`). Haiku 다운그레이드를 막고 싶다면(예: 품질을 더 보수적으로 보고 싶은 팀) 설정에서 `modelFloor`를 `sonnet`으로 다시 올리면 이전 동작으로 되돌릴 수 있습니다.
 
@@ -189,17 +191,28 @@ claude --plugin-dir .
   "routes": {
     "극소": { "model": "haiku", "effort": "medium" },
     "하": { "model": "haiku", "effort": "medium" },
-    "중": { "model": "sonnet", "effort": "high" },
+    "중": { "model": "sonnet", "effort": "medium" },
     "상": { "model": "sonnet", "effort": "high" },
     "최상": { "model": "opus", "effort": "high" }
   },
   "budget": { "enabled": false, "dailyUsd": 20, "warnPct": 70, "savePct": 90 },
   "calibration": { "enabled": false },
+  "escalation": { "cascade": false },
+  "observedChecks": { "enabled": true },
+  "fable": { "enabled": false },
   "statusLine": { "enabled": true }
 }
 ```
 
 `mode: "auto"`에서는 기본 등급표를 사용합니다. `manual`에서만 `routes`를 바꿀 수 있습니다. 팀 공유 파일 `.claude/tube-slide-router.team.json`에는 해시화한 멤버 ID와 등급별 턴·승급 수만 들어가며, 프롬프트와 파일 경로는 저장하지 않습니다.
+
+추가 설정 키(선택):
+
+| 키 | 기본값 | 설명 |
+| --- | --- | --- |
+| `escalation.cascade` | `false` | 켜면 반복 실패 시 한 등급씩 올리는 대신 FrugalGPT식으로 남은 상위 모델을 비례 승급합니다. 끄면 기존의 한 단계 승급. |
+| `observedChecks.enabled` | `true` | 턴 종료 후 테스트처럼 보이는 명령의 **실제** 통과/실패를 로컬 ledger에 기록해 다음 턴 승급 판단에 씁니다(관측된 실제 결과만 사용). |
+| `fable.enabled` | `false` | **off-by-default 레버.** 켜면 재앙 규모 위험영역(비밀정보·키, DB 마이그레이션)에 한해 상한이 opus→fable로 올라갑니다. 일반 `최상`·승급 캐스케이드는 켜도 opus 유지. fable은 **미측정** 모델이고 실가격 미상이라 비용은 `null`(미상)로 기록됩니다(0으로 지어내지 않음). `modelFloor: "fable"`도 이 키가 켜져 있어야만 적용되며, 꺼져 있으면 opus로 대체됩니다. |
 
 ## 알아두면 좋은 것
 

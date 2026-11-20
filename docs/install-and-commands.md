@@ -133,7 +133,7 @@ TSR AUTO · 활성 | Tier: 하 | Routed: haiku/medium | 적용: claude-haiku-5-5
   "routes": {
     "극소": { "model": "haiku", "effort": "medium" },
     "하": { "model": "haiku", "effort": "medium" },
-    "중": { "model": "sonnet", "effort": "high" },
+    "중": { "model": "sonnet", "effort": "medium" },
     "상": { "model": "sonnet", "effort": "high" },
     "최상": { "model": "opus", "effort": "high" }
   },
@@ -144,7 +144,7 @@ TSR AUTO · 활성 | Tier: 하 | Routed: haiku/medium | 적용: claude-haiku-5-5
 ```
 
 - `mode: "auto"` — 기본 등급표를 그대로 사용. `manual`에서만 `routes`를 바꿀 수 있습니다.
-- **기본 등급표**(위 예시와 동일): 극소·하 = Haiku/medium, 중·상 = Sonnet/high, 최상 = Opus/high.
+- **기본 등급표**(위 예시와 동일): 극소·하 = Haiku/medium, 중 = Sonnet/medium, 상 = Sonnet/high, 최상 = Opus/high. (중의 effort는 2026-11-20 high→medium: emed1 측정에서 손실 없이 비용·thinking 절약. 분류·수집 실패 등 불확실 경로의 안전 바닥은 분리되어 Sonnet/high 유지.)
 - **`modelFloor`**(모델 하한, 기본 `haiku`): 라우터가 내려갈 수 있는 가장 낮은 모델. 기본값이라 저난이도는 실제로 Haiku까지 내려갑니다. 품질을 더 보수적으로 보려면 `"modelFloor": "sonnet"`으로 올리면 Haiku로 안 내려갑니다.
 - **예산 가드(`budget`)**: 켜면 하루 API 환산 비용이 임계치(기본 경고 70%, 절약 90%, 상한 $20)를 넘을 때 등급 천장을 제한합니다.
 - **자동 보정(`calibration`)**: 기본 꺼짐. 실제 팀 기록이 충분히 쌓인 뒤에만 켜세요.

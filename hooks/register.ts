@@ -8,13 +8,14 @@ import { buildNote, fingerprint, limitsSignature, pathsSignature, resolveCachedN
 import { docsReport, INSTRUCTION_FILES, referencedPaths } from '../lib/docs.mjs'
 import { builtinEngine, jevEngine } from '../lib/engine.mjs'
 import { escalationFor } from '../lib/escalate.mjs'
+import { observedChecksPath, parseChecks, trailingFailStreak } from '../lib/checks.mjs'
 import {
   ambiguous, appendJevRecord, comparisonRecord, isPolicyRefusal, JEV_ENDPOINT, JEV_ENV_FILE, JEV_ENV_KEY,
   JevMalformedError, JEV_TIMEOUT_MS, parseEnvFile, summarizeJevComparisons,
 } from '../lib/jev.mjs'
 import { armOutcome, buildCompareArgs, compareReportText, extractCompareFields } from '../lib/compare.mjs'
 import { addToolCall, appendRecord, changedLinesOf, checkOutcome, emptyTally, STEP_CAP, stepRecord, turnRecord } from '../lib/observed.mjs'
-import { bandAdvisories, contextNote, decideRoute, downgradeAdvisories, pathsIn, preflightDecision as computePreflightDecision } from '../lib/policy.mjs'
+import { bandAdvisories, contextNote, decideRoute, downgradeAdvisories, fableCeilingModel, pathsIn, preflightDecision as computePreflightDecision } from '../lib/policy.mjs'
 import { requestCostUsd } from '../lib/prices.mjs'
 import { buildTelemetryRecord, formatTelemetryLine, telemetryPath } from '../lib/telemetry.mjs'
 import {
@@ -543,23 +544,41 @@ export const register: Register = (on, options) => {
       }
       const { value: tally } = await $.state.get({ plugin: 'tube-slide-router', key: 'turnTools', id: e.turnId })
       const current = tally ?? emptyTally()
+      // External observed checks (CI / an acceptance runner driven between turns): repeated REAL
+      // failures recorded in the ledger count the same as the agent's own repeated failing tests.
+      // They only ever ADD to the fail streak escalationFor already weighs — never a tier directly —
+      // so `failsInRow` genuine failures are still required before a single-tier move. Off unless
+      // observedChecks.enabled, so the default path is unchanged.
+      let externalStreak = 0
+      if (c.config.observedChecks?.enabled) {
+        try {
+          externalStreak = trailingFailStreak(parseChecks(await $.fs.read(observedChecksPath(c.root))))
+        } catch {
+          // no ledger yet, or unreadable — no external signal this step
+        }
+      }
+      const effective = externalStreak > 0 ? { ...current, failStreak: current.failStreak + externalStreak } : current
       let route: TurnRoute = stored
-      const up = settings?.hungry ? null : escalationFor(current, stored.tier, stored.escalatedAtStreak ?? 0, c.config.escalation.failsInRow, c.config.riskAreas)
+      const up = settings?.hungry ? null : escalationFor(effective, stored.tier, stored.escalatedAtStreak ?? 0, c.config.escalation.failsInRow, c.config.riskAreas, c.config.escalation.cascade)
       if (up) {
-        route = { ...stored, tier: up.tier as Tier, ...c.config.routes[up.tier as Tier], escalatedFrom: stored.escalatedFrom ?? stored.tier, escalatedAtStreak: current.failStreak }
+        route = { ...stored, tier: up.tier as Tier, ...c.config.routes[up.tier as Tier], escalatedFrom: stored.escalatedFrom ?? stored.tier, escalatedAtStreak: effective.failStreak }
+        // Fable ceiling (opt-in; off by default): a catastrophic risk area touched mid-turn carries a
+        // model override on `up`. Shared rule (fableCeilingModel) — upgrade-only, no-op unless enabled.
+        const upCeil = fableCeilingModel(route.model, (up as { model?: string }).model, c.config.fable?.enabled)
+        if (upCeil) route = { ...route, model: upCeil }
         await $.state.set(ref, route)
-        log(`escalated: ${stored.tier} -> ${route.tier} at step ${e.index}: ${up.reason}`)
+        log(`escalated: ${stored.tier} -> ${route.tier} at step ${e.index}: ${up.reason}${externalStreak > 0 ? ` (external observed checks: ${externalStreak} consecutive real failures)` : ''}`)
         {
           const _rec = buildTelemetryRecord({
             taskId: null, runId: null, turnId: e.turnId, stepIndex: e.index,
             policyVersion: 1, routingPolicy: c.config.routingPolicy,
             difficultyScore: null, tier: route.tier, profile: c.config.routeProfile, confidence: null,
-            rationale: [up.reason], source: 'escalation',
+            rationale: externalStreak > 0 ? [up.reason, `external observed checks: ${externalStreak} consecutive real failures`] : [up.reason], source: 'escalation',
             classifyLabel: null, llmEvaluated: false,
             selectedModel: route.model, selectedEffort: route.effort,
             actualModel: null, actualEffort: null,
             escalatedFrom: stored.escalatedFrom ?? stored.tier,
-            escalatedAtStreak: current.failStreak, shadow: null,
+            escalatedAtStreak: effective.failStreak, shadow: null,
             preflightDecision: null, decisionSource: 'escalation',
             preflightElapsedMs: null, classificationCallSkipped: false, fallbackReason: null,
             contextStrategy: null, contextFiles: null, contextBytesOrTokens: null,
@@ -586,6 +605,14 @@ export const register: Register = (on, options) => {
     }
 
     await $.state.set({ plugin: 'tube-slide-router', key: 'currentTurnId' }, e.turnId)
+    // Carry an unresolved fail streak from the previous turn of this session into this one, so
+    // repeated real failures escalate even across turns (not reset to 0 every turn). The streak
+    // only ever came from the agent's own failing test runs, and a passing test still resets it
+    // (observed.mjs). Single-shot is unaffected: there is no previous turn, so nothing carries.
+    const { value: priorRoute } = await $.state.get({ plugin: 'tube-slide-router', key: 'lastRoute' })
+    if (priorRoute?.failStreak) {
+      await $.state.set({ plugin: 'tube-slide-router', key: 'turnTools', id: e.turnId }, { ...emptyTally(), failStreak: priorRoute.failStreak })
+    }
     // AF. Primary: read text cached by turn.start handler (works in all modes including headless).
     // Fallback 1: $.session.messages({ as: 'api' }) with .content (API format).
     // Fallback 2: $.session.messages() with .text (interactive format).
@@ -904,7 +931,10 @@ const recordTurn = async ($: any, e: any) => {
       tiers: addToCal(cal?.tiers ?? emptyCal(), record),
       bands: addToBandCal(cal?.bands ?? emptyBandCal(), record),
     })
-    await $.state.set({ plugin: 'tube-slide-router', key: 'lastRoute' }, { tier: route.tier, model: route.model, effort: route.effort })
+    // Persist escalation memory beside the route: `escalatedFrom` lets the next turn's preflight
+    // `recentlyEscalated` check actually fire (it was dead — this field was never written), and
+    // `failStreak` carries an unresolved streak into the next turn (seeded at that turn's step 0).
+    await $.state.set({ plugin: 'tube-slide-router', key: 'lastRoute' }, { tier: route.tier, model: route.model, effort: route.effort, escalatedFrom: route.escalatedFrom ?? null, failStreak: (tally ?? emptyTally()).failStreak })
     $.ui.log(`[tube-slide-router] turn recorded: predicted=${record.predicted} final=${record.final} observed=${record.observed ?? 'none'} files=${record.files} tests=${record.tests}`, quiet(c.config))
 }
 
@@ -1027,6 +1057,44 @@ const registerCommandsAndPane = (on: Parameters<Register>[0]) => {
       const routerResult = await runArm(routerDir, routerInvocation)
       return { text: compareReportText({ prompt, baseline: baselineResult, router: routerResult }) }
     }
+    if (arg === 'export') {
+      // Read-only export of THIS project's calibration stats (④축 승급 통계), reloaded fresh so
+      // turns recorded earlier in this very session are included — ensureCtx's cached ctx is
+      // frozen at session.start and would miss them. This is deliberately NOT the old team-file
+      // write feature (removed 2026-11-11, HANDOFF.md: USER/USERNAME collision + lost-update bugs,
+      // unproven value): nothing is written, no external id, no merge — it just prints what this
+      // project has learned so a person can inspect or copy it. When there is nothing to show it
+      // says so plainly rather than printing an all-zero table or opening the pane (the old bug:
+      // `export` matched no branch and silently fell through to $.ui.open).
+      const fresh = await loadCtx($)
+      const tiers = fresh.calStats
+      const totalTurns = TIERS.reduce((n: number, t: Tier) => n + (tiers[t]?.turns ?? 0), 0)
+      if (totalTurns === 0) {
+        return {
+          text:
+            '내보낼 보정(calibration) 데이터가 아직 없습니다. 이 프로젝트에서 라우팅된 턴이 끝날 때마다 등급별 승급 통계가 쌓이는데, 지금은 집계된 턴이 0개입니다.\n' +
+            '라우팅된 턴이 몇 번 쌓인 뒤에 다시 /tsr-router export 를 실행하세요. (이 명령은 파일을 쓰지 않고 현재 통계만 읽어서 보여줍니다.)',
+        }
+      }
+      const payload = {
+        kind: 'tube-slide-router-calibration-export',
+        version: 1,
+        exportedAt: new Date().toISOString(),
+        project: fresh.projHash,
+        configSource: fresh.configSource,
+        modelFloor: fresh.config.modelFloor,
+        routeProfile: fresh.config.routeProfile,
+        totalTurns,
+        tiers,
+        bands: fresh.bandStats,
+      }
+      return {
+        text:
+          `보정 데이터 내보내기 (읽기 전용 · 이 프로젝트 ${fresh.projHash} · 총 ${totalTurns}턴 집계)\n` +
+          '아래 JSON은 파일로 저장되지 않았습니다 — 필요하면 직접 복사해서 보관하세요.\n\n' +
+          JSON.stringify(payload, null, 2),
+      }
+    }
     const sid = await $.session.id()
     const turns = ((await $.store.get(turnsKey(sid))) as any[] | undefined) ?? []
     const { value: classifierHealth } = await $.state.get({ plugin: 'tube-slide-router', key: 'classifierHealth' })
@@ -1038,7 +1106,7 @@ const registerCommandsAndPane = (on: Parameters<Register>[0]) => {
     const status = statusText({
       config: c.config, settings: s, spentTodayUsd: await spentToday($, c.projHash), turns, errors: c.errors, configSource: c.configSource, classifierHealth, jevSummary,
       downgradeNotes: downgradeAdvisories(c.calStats, c.config.downgrade), bandNotes: bandAdvisories(c.bandStats, c.config.bandCalibration),
-      usage: latestUsage(usageRows),
+      usage: latestUsage(usageRows), riskAreas: c.config.riskAreas,
     })
     if (arg === 'status') return { text: status }
     await setPane($, arg === 'setup' ? 'welcome' : 'status', draftFrom(c.config))
@@ -1048,28 +1116,42 @@ const registerCommandsAndPane = (on: Parameters<Register>[0]) => {
   })
 
   on('command.run', { command: 'tsr-docs' }, async ($, e) => {
-    const root = await $.session.root()
-    const files = [...INSTRUCTION_FILES, 'README.md']
-    if (e.args.trim() === 'all') {
-      const entries = await $.fs.list(`${root}/docs`).catch(() => [])
-      for (const en of entries) if (en.kind === 'file' && en.name.endsWith('.md')) files.push(`docs/${en.name}`)
-    }
-    const results = []
-    for (const file of files) {
-      const abs = `${root}/${file}`
-      if (!(await $.fs.exists(abs).catch(() => false))) continue
-      const text = await $.fs.read(abs).catch(() => '')
-      const dir = file.includes('/') ? file.slice(0, file.lastIndexOf('/')) : ''
-      const refs = referencedPaths(text)
-      const missing = []
-      for (const p of refs) {
-        const fromRoot = await $.fs.exists(`${root}/${p}`).catch(() => false)
-        const fromDir = dir ? await $.fs.exists(`${root}/${dir}/${p}`).catch(() => false) : false
-        if (!fromRoot && !fromDir) missing.push(p)
+    try {
+      // Reuse the session root that ensureCtx already resolved (loadCtx's `$.session.root()`,
+      // cached at session.start) instead of calling `$.session.root()` again here: that lone
+      // extra call was the only thing this handler did that the working /tsr-router path did not,
+      // and reading the root from the shared ctx keeps the two consistent. `e.args` is a string
+      // per the engine contract, but guard it anyway so a stray undefined never throws the whole
+      // command into "produces nothing".
+      const c = await ensureCtx($)
+      const root = c.root
+      const args = (e.args ?? '').trim()
+      const files = [...INSTRUCTION_FILES, 'README.md']
+      if (args === 'all') {
+        const entries = await $.fs.list(`${root}/docs`).catch(() => [])
+        for (const en of entries) if (en.kind === 'file' && en.name.endsWith('.md')) files.push(`docs/${en.name}`)
       }
-      results.push({ file, checked: refs.length, missing })
+      const results = []
+      for (const file of files) {
+        const abs = `${root}/${file}`
+        if (!(await $.fs.exists(abs).catch(() => false))) continue
+        const text = await $.fs.read(abs).catch(() => '')
+        const dir = file.includes('/') ? file.slice(0, file.lastIndexOf('/')) : ''
+        const refs = referencedPaths(text)
+        const missing = []
+        for (const p of refs) {
+          const fromRoot = await $.fs.exists(`${root}/${p}`).catch(() => false)
+          const fromDir = dir ? await $.fs.exists(`${root}/${dir}/${p}`).catch(() => false) : false
+          if (!fromRoot && !fromDir) missing.push(p)
+        }
+        results.push({ file, checked: refs.length, missing })
+      }
+      return { text: docsReport(results) }
+    } catch (err: any) {
+      // A command.run hook that throws surfaces as nothing/an opaque error to the person; turn any
+      // unexpected failure into a visible message instead so /tsr-docs always answers.
+      return { text: `/tsr-docs 를 실행하지 못했습니다: ${String(err?.message ?? err)}` }
     }
-    return { text: docsReport(results) }
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, (async ($, e) => {
@@ -1086,7 +1168,7 @@ const registerCommandsAndPane = (on: Parameters<Register>[0]) => {
 
     if (view === 'welcome') {
       return col(
-        h(Text, { mono: true }, LOGO),
+        h(Text, { bold: true }, 'Tube Slide Router'),
         h(Text, { dimColor: true }, TAGLINE),
         h(Text, { bold: true }, '처음 오셨네요. 라우팅을 어떻게 시작할까요?'),
         h(Button, { key: 'auto', variant: 'primary', onPress: () => go('budget', { ...draft, mode: 'auto', routes: structuredClone(DEFAULTS.routes) as PaneDraft['routes'] }) }, '자동 모드 (추천) — 기본 등급표로 바로 시작'),
@@ -1154,7 +1236,7 @@ const registerCommandsAndPane = (on: Parameters<Register>[0]) => {
     const text = statusText({
       config: c.config, settings: settings ?? {}, spentTodayUsd: await spentToday($, c.projHash), turns, errors: c.errors, configSource: c.configSource, classifierHealth, jevSummary,
       downgradeNotes: downgradeAdvisories(c.calStats, c.config.downgrade), bandNotes: bandAdvisories(c.bandStats, c.config.bandCalibration),
-      usage: latestUsage(usageRows),
+      usage: latestUsage(usageRows), riskAreas: c.config.riskAreas,
     })
     return col(
       h(Text, { bold: true }, 'Tube Slide Router'),

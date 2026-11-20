@@ -139,7 +139,10 @@ TSR AUTO · 활성 | Tier: 하 | Routed: haiku/medium | 적용: claude-haiku-5-5
   },
   "budget": { "enabled": false, "dailyUsd": 20, "warnPct": 70, "savePct": 90 },
   "calibration": { "enabled": false },
-  "statusLine": { "enabled": true }
+  "statusLine": { "enabled": true },
+  "escalation": { "failsInRow": 2, "cascade": true },
+  "observedChecks": { "enabled": false },
+  "fable": { "enabled": false }
 }
 ```
 
@@ -148,6 +151,9 @@ TSR AUTO · 활성 | Tier: 하 | Routed: haiku/medium | 적용: claude-haiku-5-5
 - **`modelFloor`**(모델 하한, 기본 `haiku`): 라우터가 내려갈 수 있는 가장 낮은 모델. 기본값이라 저난이도는 실제로 Haiku까지 내려갑니다. 품질을 더 보수적으로 보려면 `"modelFloor": "sonnet"`으로 올리면 Haiku로 안 내려갑니다.
 - **예산 가드(`budget`)**: 켜면 하루 API 환산 비용이 임계치(기본 경고 70%, 절약 90%, 상한 $20)를 넘을 때 등급 천장을 제한합니다.
 - **자동 보정(`calibration`)**: 기본 꺼짐. 실제 팀 기록이 충분히 쌓인 뒤에만 켜세요.
+- **승급 캐스케이드(`escalation.cascade`, 기본 `true`)**: 테스트가 `failsInRow`회(기본 2) 연속 실패하면 한 등급 올리고, 계속 실패하면 한 단계씩 더(최상까지) 비례 승급합니다. `false`로 끄면 한 번에 한 단계만.
+- **외부 체크 관측(`observedChecks.enabled`, 기본 `false`)**: 켜면 턴 종료 후 외부 체크(CI·pre-commit·테스트 러너)의 **실제** 통과/실패를 로컬 ledger에 기록해 다음 턴 승급 판단에 씁니다(관측된 실제 결과만 사용).
+- **fable 상한(`fable.enabled`, 기본 `false`)**: 켜면 재앙 규모 위험영역(비밀정보·키, DB 마이그레이션)에 한해 상한이 opus→fable로 올라갑니다. 일반 최상·승급 캐스케이드는 켜도 opus 유지. fable은 미측정 모델이라 비용은 `null`(미상)로 기록됩니다(0으로 지어내지 않음).
 
 ---
 
